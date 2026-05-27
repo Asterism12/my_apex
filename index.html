@@ -3,32 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Apex 大逃杀 20队模拟</title>
+    <title>Apex 世界赛决赛模拟系统 (赛点制)</title>
     <link rel="stylesheet" href="./src/ui/style.css">
+    <style>
+        .match-point-fire { color: #ff9800; font-weight: bold; }
+        .tour-board { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .tour-board table { width: 100%; border-collapse: collapse; text-align: left; }
+        .tour-board th, .tour-board td { border-bottom: 1px solid #444; padding: 5px; }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>Apex 大逃杀模拟器 (20 团队)</h1>
+        <h1>Apex 世界赛决赛模拟系统 (赛点制 Match Point)</h1>
         
         <div class="settings" style="background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
             <div style="margin-bottom: 10px;">
-                <label>Tick 速度 (毫秒/跳, 推荐20-500): </label>
+                <label>Tick 速度 (毫秒/跳): </label>
                 <input type="number" id="tickSpeed" value="300" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;">
             </div>
             <div>
-                <label>安全区缩小速度 (每10Tick缩减半径, 推荐1-50): </label>
+                <label>安全区缩小速度: </label>
                 <input type="number" id="shrinkSpeed" value="10" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;">
             </div>
         </div>
 
-        <button id="startBtn">生成大逃杀对局 (本地模式)</button>
+        <button id="startBtn">启动赛事</button>
+        <button id="fastForwardBtn" style="display:none; background:#e91e63;">⏩ 快速结束本局</button>
+        <button id="nextMatchBtn" style="display:none; background:#ff9800;">开始下一局 (Match) >></button>
+
+        <div class="tour-board" id="tourBoard" style="display:none;">
+            <h3 id="tourTitle" style="color:#2196f3; margin-top:0;">赛事总积分榜 - Match 0</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>队伍</th>
+                        <th>总积分</th>
+                        <th>总击杀</th>
+                        <th>赛点状态</th>
+                    </tr>
+                </thead>
+                <tbody id="tourTableBody"></tbody>
+            </table>
+        </div>
 
         <div class="battle-area" style="display:none;" id="battleArea">
             <div class="dashboard" style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <div class="map-info" style="flex: 1; min-width: 300px;">
-                    <h3>全局地图状态</h3>
+                <div class="map-info" style="flex: 1; min-width: 400px;">
+                    <h3>当前局地图状态</h3>
                     <div id="mapStatus"></div>
-                    <div class="team-list" id="teamList"></div>
+                    <div id="miniMap" style="position: relative; width: 400px; height: 400px; background: #111; border-radius: 8px; overflow: hidden; border: 2px solid #555; margin-bottom: 15px; box-shadow: inset 0 0 20px #000;">
+                        <div id="miniMapRing" style="position: absolute; border: 2px solid rgba(0, 172, 193, 0.8); border-radius: 50%; box-sizing: border-box; background: rgba(0, 172, 193, 0.1); transition: all 0.3s ease;"></div>
+                    </div>
+                    <div class="team-list" id="teamList" style="max-height: 400px; overflow-y: auto;"></div>
                 </div>
                 
                 <div class="live-spectate" style="flex: 1; min-width: 300px; background: #222; padding: 15px; border-radius: 8px;">
@@ -47,7 +74,7 @@
                 </div>
 
                 <div class="feed-info" style="flex: 1; min-width: 300px;">
-                    <h3>全局击杀公告 (Kill Feed)</h3>
+                    <h3>全局地图播报 (Live Feed)</h3>
                     <div id="logs" class="log-container" style="height: 400px; overflow-y: auto;"></div>
                 </div>
             </div>
