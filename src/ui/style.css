@@ -1,0 +1,95 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #1e1e1e;
+    color: #eaeaea;
+    margin: 0;
+    padding: 20px;
+}
+.container {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+h1, h3 {
+    color: #ffca28;
+}
+#startBtn {
+    background-color: #e53935;
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    width: 100%;
+}
+#startBtn:hover {
+    background-color: #f44336;
+}
+.battle-area {
+    margin-top: 20px;
+}
+.dashboard {
+    display: flex;
+    gap: 20px;
+}
+.map-info, .feed-info {
+    background-color: #2a2a2a;
+    padding: 20px;
+    border-radius: 8px;
+    flex: 1;
+}
+.feed-info {
+    flex: 2;
+}
+.team-list {
+    margin-top: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+.team-item {
+    font-size: 13px;
+    padding: 5px;
+    border-bottom: 1px solid #444;
+}
+.team-dead {
+    color: #777;
+    text-decoration: line-through;
+}
+.team-alive {
+    color: #4caf50;
+}
+.team-fighting {
+    color: #ff9800;
+}
+.log-container {
+    height: 450px;
+    overflow-y: auto;
+    background-color: #1a1a1a;
+    padding: 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+}
+.log-container p {
+    margin: 4px 0;
+    color: #ccc;
+}
+.log-highlight {
+    color: #ffca28 !important;
+    font-weight: bold;
+}
+.log-fatal {
+    color: #f44336 !important;
+}
+.comm-item {
+    margin: 8px 0;
+    transition: background 0.3s;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.comm-highlight {
+    background-color: rgba(33, 150, 243, 0.3);
+    border-left: 4px solid #2196f3;
+}

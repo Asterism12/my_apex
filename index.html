@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apex 大逃杀 20队模拟</title>
+    <link rel="stylesheet" href="./src/ui/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Apex 大逃杀模拟器 (20 团队)</h1>
+        
+        <div class="settings" style="background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="margin-bottom: 10px;">
+                <label>Tick 速度 (毫秒/跳, 推荐20-500): </label>
+                <input type="number" id="tickSpeed" value="300" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;">
+            </div>
+            <div>
+                <label>安全区缩小速度 (每10Tick缩减半径, 推荐1-50): </label>
+                <input type="number" id="shrinkSpeed" value="10" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;">
+            </div>
+        </div>
+
+        <button id="startBtn">生成大逃杀对局 (本地模式)</button>
+
+        <div class="battle-area" style="display:none;" id="battleArea">
+            <div class="dashboard" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div class="map-info" style="flex: 1; min-width: 300px;">
+                    <h3>全局地图状态</h3>
+                    <div id="mapStatus"></div>
+                    <div class="team-list" id="teamList"></div>
+                </div>
+                
+                <div class="live-spectate" style="flex: 1; min-width: 300px; background: #222; padding: 15px; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0; color: #ff9800;">当前追踪队伍</h3>
+                        <div>
+                            <select id="followTeamSelect" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;"></select>
+                            <label style="margin-left: 10px; font-size: 14px; cursor: pointer;">
+                                <input type="checkbox" id="liveTtsToggle" checked> 开启实时语音
+                            </label>
+                        </div>
+                    </div>
+                    <div id="liveTeamStatus" style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #444;">选定队伍后查看状态</div>
+                    <h4>小队通讯与事件</h4>
+                    <div id="liveTeamLogs" class="log-container" style="height: 300px; background: #1a1a1a; padding: 10px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="feed-info" style="flex: 1; min-width: 300px;">
+                    <h3>全局击杀公告 (Kill Feed)</h3>
+                    <div id="logs" class="log-container" style="height: 400px; overflow-y: auto;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="comms-review" style="display:none; margin-top:20px; background:#2a2a2a; padding:20px; border-radius:8px;" id="commsReview">
+            <h3 style="color:#2196f3; margin-top:0;">赛后小队语音通讯记录 (Voice Comms)</h3>
+            <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                <label>选择想要复盘的队伍:</label>
+                <select id="teamSelect" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:6px; outline:none; cursor:pointer;"></select>
+                <button id="playAudioBtn" style="background:#2196f3; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">▶️ 播放语音通讯</button>
+                <button id="stopAudioBtn" style="background:#757575; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">⏹️ 停止</button>
+            </div>
+            <div id="commsLog" class="log-container" style="height: 350px;"></div>
+        </div>
+    </div>
+    <script src="./src/data/teams.js"></script>
+    <script src="./src/data/corpus.js"></script>
+    <script src="./src/logic/engine.js"></script>
+    <script src="./src/control/localAdapter.js"></script>
+    <script src="./src/ui/app.js"></script>
+</body>
+</html>

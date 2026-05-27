@@ -1,0 +1,22 @@
+const APEX_TEAMS = [
+    { teamName: "TSM", players: ["ImperialHal", "Reps", "Verhulst"] },
+    { teamName: "NRG", players: ["sweetdreams", "nafen", "Gild"] },
+    { teamName: "DarkZero", players: ["Zer0", "Genburten", "Xynew"] },
+    { teamName: "XSET", players: ["Nocturnal", "FunFPS", "sSikezz"] },
+    { teamName: "OpTic Gaming", players: ["Dropped", "SkittleCakes", "Knoqd"] },
+    { teamName: "Alliance", players: ["Hakis", "Yuki", "Effect"] },
+    { teamName: "Fnatic", players: ["YukaF", "MatsuTash", "Meltstera"] },
+    { teamName: "FaZe", players: ["Snip3down", "Phony", "Frexs"] },
+    { teamName: "Complexity", players: ["Monsoon", "Lewda", "Cody"] },
+    { teamName: "100 Thieves", players: ["Vaxlon", "Scuwry", "Onmuu"] },
+    { teamName: "Luminosity", players: ["YanYa", "Neazul", "Jaguares"] },
+    { teamName: "Crazy Raccoon", players: ["Ras", "Selly", "Mainy"] },
+    { teamName: "Riddle", players: ["Obly", "KaronPe", "Parkha"] },
+    { teamName: "Acend", players: ["K4shera", "PostKiLL", "Lufka"] },
+    { teamName: "Moist Esports", players: ["Wxltzy", "Emtee", "Prycyy"] },
+    { teamName: "Pioneers", players: ["Gnaske", "SirDel", "Zaine"] },
+    { teamName: "DreamFire", players: ["Roza", "FC", "x1xn"] },
+    { teamName: "NORTHEPTION", players: ["Taida", "ReyzyGG", "YukaPERO"] },
+    { teamName: "PULVEREX", players: ["Ftyan", "shenshe", "Lej"] },
+    { teamName: "Oxygen Esports", players: ["BRDEMZ", "enemy", "Vein"] }
+];
