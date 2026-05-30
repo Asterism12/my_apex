@@ -220,9 +220,20 @@ function renderBRState(state, tournament) {
     });
     // ==== 地图渲染结束 ====
 
+    const _stateLabel = (p) => {
+        if (p.isDown) return '<span style="color:#f44336;">倒地</span>';
+        const labels = { idle:'空闲', shooting:'🔥开火', reloading:'🔄换弹', healing_shield:'🔋打电', healing_hp:'💉打药', reviving:'🤝救援', 'in_cover':'🛡️缩掩体' };
+        return labels[p.state] || p.state;
+    };
+    const _shieldHtml = (p) => p.shield !== undefined ? `<span style="color:#2196f3;">🛡️${p.shield}</span>` : '';
+
     const teamListHtml = Object.values(state.teams).map(t => {
         let statusClass = t.status === 'dead' ? 'team-dead' : (t.status === 'fight' ? 'team-fighting' : 'team-alive');
-        let playersInfo = t.status === 'dead' ? '全员淘汰' : t.players.map(p => `${p.name}: ` + (p.isDown ? '♥️0' : `♥️${p.hp.toFixed(0)}`)).join(' | ');
+        let playersInfo = t.status === 'dead' ? '全员淘汰' : t.players.map(p => {
+            let s = _shieldHtml(p);
+            let st = _stateLabel(p);
+            return `${p.name}: ` + (p.isDown ? `♥️0 ${st}` : `♥️${p.hp.toFixed(0)} ${s} ${st}`);
+        }).join(' | ');
         let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
         let mpIcon = tournament.teams[t.id].IsMatchPointEligible ? '🔥' : '';
         
@@ -234,16 +245,113 @@ function renderBRState(state, tournament) {
 
     if (followedTeamId && state.teams[followedTeamId]) {
         const t = state.teams[followedTeamId];
-        let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
-        let playersInfo = t.status === 'dead' ? '全员淘汰' : t.players.map(p => `${p.name}: ` + (p.isDown ? '<span style="color:#f44336;">倒地</span>' : `<span style="color:#4caf50;">♥️${p.hp.toFixed(0)}</span>`)).join(' | ');
+        let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '🔥 交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
+        
+        // 战斗详情：若正在交火，显示敌方信息
+        let combatInfo = '';
+        let enemyCards = '';
+        if (t.status === 'fight') {
+            let myCombat = state.combats.find(c => c.teams.includes(t.id));
+            if (myCombat) {
+                let enemyIds = myCombat.teams.filter(id => id !== t.id);
+                let enemyNames = enemyIds.map(id => {
+                    let et = state.teams[id];
+                    return et ? (et.status === 'dead' ? `<span style="color:#777;text-decoration:line-through;">${et.name}</span>` : `<span style="color:#f44336;">${et.name}</span>`) : id;
+                }).join('、');
+                combatInfo = `<div style="margin:6px 0; padding:4px 8px; background:#331111; border-radius:4px; border-left:3px solid #f44336; font-size:13px;">⚔️ 交战对手: ${enemyNames}</div>`;
+
+                // 敌方队员状态卡片
+                enemyIds.forEach(eid => {
+                    let et = state.teams[eid];
+                    if (!et || et.status === 'dead') return;
+                    enemyCards += `<div style="margin-top:8px; padding:6px 10px; background:#2a1111; border-radius:6px; border:1px solid #441111;">
+                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}</div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">` + et.players.map(p => {
+                            let hpPct = Math.max(0, p.hp);
+                            let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                            let stateLabel = '';
+                            let stateColor = '#888';
+                            if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
+                            else if (p.state === 'shooting') { stateLabel = '开火中'; stateColor = '#f44336'; }
+                            else if (p.state === 'reloading') { stateLabel = '换弹'; stateColor = '#ff9800'; }
+                            else if (p.state === 'healing_shield') { stateLabel = '打电'; stateColor = '#2196f3'; }
+                            else if (p.state === 'healing_hp') { stateLabel = '打药'; stateColor = '#4caf50'; }
+                            else if (p.state === 'reviving') { stateLabel = '救援'; stateColor = '#9c27b0'; }
+                            else if (p.state === 'in_cover') { stateLabel = '缩掩体'; stateColor = '#ff5722'; }
+                            else { stateLabel = '空闲'; stateColor = '#4caf50'; }
+                            return `
+                            <div style="flex:1; min-width:80px; background:#1a1a1a; padding:6px; border-radius:4px; border:1px solid #333;">
+                                <div style="font-weight:bold; font-size:12px; margin-bottom:3px;">${p.name}</div>
+                                <div style="font-size:11px; margin-bottom:3px;">
+                                    <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
+                                    ${shieldPct > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldPct}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
+                                </div>
+                                <div style="width:100%; height:3px; background:#333; border-radius:2px; margin-bottom:3px; overflow:hidden;">
+                                    <div style="width:${hpPct}%; height:100%; background:linear-gradient(90deg,#f44336,#e53935);"></div>
+                                </div>
+                                ${shieldPct > 0 ? `<div style="width:100%; height:2px; background:#333; border-radius:2px; margin-bottom:3px; overflow:hidden;">
+                                    <div style="width:${Math.min(100, shieldPct * 2)}%; height:100%; background:linear-gradient(90deg,#2196f3,#03a9f4);"></div>
+                                </div>` : ''}
+                                <div style="font-size:11px; color:${stateColor}; font-weight:bold;">${stateLabel}</div>
+                            </div>`;
+                        }).join('') + `</div></div>`;
+                });
+            }
+        }
+
+        // 队员详细状态卡片
+        let playersCards = '';
+        if (t.status !== 'dead') {
+            playersCards = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">' + t.players.map(p => {
+                let hpPct = Math.max(0, p.hp);
+                let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                let mag = p.magAmmo !== undefined ? p.magAmmo : '-';
+                let stateLabel = '';
+                let stateColor = '#888';
+                if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
+                else if (p.state === 'shooting') { stateLabel = '开火中'; stateColor = '#f44336'; }
+                else if (p.state === 'reloading') { stateLabel = '换弹'; stateColor = '#ff9800'; }
+                else if (p.state === 'healing_shield') { stateLabel = '打电'; stateColor = '#2196f3'; }
+                else if (p.state === 'healing_hp') { stateLabel = '打药'; stateColor = '#4caf50'; }
+                else if (p.state === 'reviving') { stateLabel = '救援'; stateColor = '#9c27b0'; }
+                else if (p.state === 'in_cover') { stateLabel = '缩掩体'; stateColor = '#ff5722'; }
+                else { stateLabel = '空闲'; stateColor = '#4caf50'; }
+
+                return `
+                <div style="flex:1; min-width:90px; background:#1a1a1a; padding:8px; border-radius:6px; border:1px solid #333;">
+                    <div style="font-weight:bold; font-size:13px; margin-bottom:4px;">${p.name}</div>
+                    <div style="font-size:11px; margin-bottom:4px;">
+                        <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
+                        ${shieldPct > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldPct}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
+                    </div>
+                    <div style="width:100%; height:4px; background:#333; border-radius:2px; margin-bottom:4px; overflow:hidden;">
+                        <div style="width:${hpPct}%; height:100%; background:linear-gradient(90deg,#f44336,#e53935);"></div>
+                    </div>
+                    ${shieldPct > 0 ? `<div style="width:100%; height:3px; background:#333; border-radius:2px; margin-bottom:4px; overflow:hidden;">
+                        <div style="width:${Math.min(100, shieldPct * 2)}%; height:100%; background:linear-gradient(90deg,#2196f3,#03a9f4);"></div>
+                    </div>` : ''}
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+                        <span style="color:${stateColor}; font-weight:bold;">${stateLabel}</span>
+                        ${p.state === 'shooting' ? `<span style="color:#ffca28;">🔫${mag}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('') + '</div>';
+        } else {
+            playersCards = '<div style="color:#777; margin-top:8px;">全员淘汰</div>';
+        }
         
         let tourTeam = tournament.teams[t.id];
         let mpText = tourTeam.IsMatchPointEligible ? '<span class="match-point-fire">🔥赛点队伍</span>' : `积分: ${tourTeam.TotalScore}`;
 
         document.getElementById('liveTeamStatus').innerHTML = `
-            <strong>${t.name}</strong> (${mpText}) [${statusText}] <br/>
-            队员: ${playersInfo} <br/>
-            局击杀: ${t.kills} | 装备值: ${t.equipValue}
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong>${t.name}</strong>
+                <span style="font-size:12px;">${mpText} | 击杀: ${t.kills} | 装备: ${t.equipValue}</span>
+            </div>
+            <div style="margin-top:4px; font-size:14px;">[${statusText}]</div>
+            ${combatInfo}
+            ${enemyCards}
+            ${playersCards}
         `;
 
         const logsContainer = document.getElementById('liveTeamLogs');

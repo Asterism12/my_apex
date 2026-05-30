@@ -53,6 +53,9 @@ function initMatch() {
             status: 'loot',
             equipValue: 0,
             aggro: t.IsMatchPointEligible ? 20 : (Math.floor(Math.random() * 50) + 50),
+            aim: 50,
+            experience: 50,
+            terrain: 50,
             comms: [],
             kills: 0,
             placement: 20,
@@ -168,41 +171,38 @@ function processBRTick(state) {
         });
     });
 
-    // 5. 战斗微操作
+    // 5. 战斗微操作 (v2 Burst-Fire 引擎)
     let finalCombats = [];
     newState.combats.forEach(combat => {
-        let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t.status !== 'dead');
-        
+        let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t && t.status !== 'dead');
+
         if (fightingTeams.length <= 1) {
             if (fightingTeams.length === 1) {
-                fightingTeams[0].status = 'loot'; 
-                fightingTeams[0].equipValue = Math.min(100, fightingTeams[0].equipValue + 20);
-                newState.logs.push(`[Tick ${newState.tick}] 🏆 ${fightingTeams[0].name} 赢得了该区域的战斗！`);
+                let winner = fightingTeams[0];
+                winner.status = 'loot';
+                winner.equipValue = Math.min(100, winner.equipValue + 20);
+                newState.logs.push(`[Tick ${newState.tick}] 🏆 ${winner.name} 赢得了该区域的战斗！`);
             }
         } else {
-            fightingTeams.forEach(atkTeam => {
-                let aliveDefenders = fightingTeams.filter(t => t.id !== atkTeam.id);
-                if(aliveDefenders.length > 0) {
-                    let targetTeam = aliveDefenders[Math.floor(Math.random() * aliveDefenders.length)];
-                    let targetPlayer = targetTeam.players.find(p => !p.isDown);
-                    let attackerPlayer = atkTeam.players.find(p => !p.isDown);
-                    
-                    if (targetPlayer && attackerPlayer && Math.random() < 0.3) { 
-                        let dmg = 15 + atkTeam.equipValue * 0.1;
-                        targetPlayer.hp -= dmg;
-                        if (targetPlayer.hp <= 0) {
-                            targetPlayer.hp = 0;
-                            targetPlayer.isDown = true;
-                            atkTeam.kills++; // 计入击杀数
-                            addTeamComm(atkTeam, 'KILL', newState.tick, targetTeam.name);
-                            addTeamComm(targetTeam, 'DOWN', newState.tick, atkTeam.name);
-                            newState.logs.push(`[Tick ${newState.tick}] 🎯 ${atkTeam.name}(${attackerPlayer.name}) 击倒了 ${targetTeam.name}(${targetPlayer.name})！`);
-                        }
-                    }
-                    checkTeamAlive(targetTeam, newState);
-                }
+            let result = processCombatTickV2(combat, newState.teams, newState.tick, newState);
+            newState.logs.push(...result.logs);
+
+            // 检查参战队伍存活状态（v2 倒地兼容）
+            combat.teams.forEach(tid => {
+                let t = newState.teams[tid];
+                if (t && t.status !== 'dead') checkTeamAlive(t, newState);
             });
-            finalCombats.push(combat); 
+
+            if (result.combatEnded) {
+                if (result.winnerTeamId) {
+                    let winner = newState.teams[result.winnerTeamId];
+                    winner.status = 'loot';
+                    winner.equipValue = Math.min(100, winner.equipValue + 20);
+                    newState.logs.push(`[Tick ${newState.tick}] 🏆 ${winner.name} 赢得了该区域的战斗！`);
+                }
+            } else {
+                finalCombats.push(combat);
+            }
         }
     });
     newState.combats = finalCombats;
@@ -257,8 +257,10 @@ function processBRTick(state) {
 
 function checkTeamAlive(team, state) {
     if (team.status === 'dead') return;
-    let anyAlive = team.players.some(p => !p.isDown && p.hp > 0);
-    if (!anyAlive) {
+    let anyStanding = team.players.some(p => !p.isDown && p.hp > 0);
+    // v2 兼容：倒地的队员（downTimer > 0）也视为存活，给救援机会
+    let anyDowned = team.players.some(p => p.isDown && p.hp >= 0 && p.downTimer > 0);
+    if (!anyStanding && !anyDowned) {
         team.placement = state.aliveTeamsCount;
         state.aliveTeamsCount--;
         team.status = 'dead';
@@ -278,7 +280,7 @@ function addTeamComm(team, type, tick, targetName = "") {
     const lines = typeof COMM_CORPUS !== 'undefined' ? COMM_CORPUS[type] : [type];
     if (!lines || !lines.length) return;
     
-    if (["WIN", "DEAD", "KILL", "DOWN", "DROP", "ENGAGE_ALERT", "ENGAGE_INFO", "THIRD_PARTY"].indexOf(type) === -1) {
+    if (["WIN", "DEAD", "KILL", "DOWN", "DROP", "ENGAGE_ALERT", "ENGAGE_INFO", "THIRD_PARTY", "SHIELD_BREAK", "REVIVE_START", "REVIVE_SUCCESS", "REVIVE_CANCEL", "EXECUTION", "HEADSHOT"].indexOf(type) === -1) {
         if (team.lastCommTick && tick - team.lastCommTick < 15) return;
         if (Math.random() > 0.1) return;
     }
