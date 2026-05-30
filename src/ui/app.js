@@ -163,6 +163,111 @@ function runBRSimulation() {
     }, currentTickSpeed);
 }
 
+/**
+ * 渲染当前追踪队伍的图形化战斗状态面板
+ */
+function renderCombatStatusHTML(state, tournament, t) {
+    const tourTeam = tournament.teams[t.id];
+    const mpText = tourTeam.IsMatchPointEligible ? '<span class="match-point-fire">🔥赛点</span>' : `积分:${tourTeam.TotalScore}`;
+    const statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '🔥 交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
+
+    const renderCard = (p, teamCtx, isEnemy) => {
+        const hpPct = Math.max(0, p.hp);
+        const shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+        const mag = p.magAmmo !== undefined ? p.magAmmo : '-';
+        const nameColor = isEnemy ? 'color:#ff8a80;' : 'color:#81c784;';
+        const isDead = p.isDead || p.state === 'dead';
+        const isDown = p.isDown;
+
+        let stateLabel = '';
+        let stateBg = '';
+        if (isDead) { stateLabel = '淘汰'; stateBg = 'background:#424242;color:#9e9e9e;'; }
+        else if (isDown) { stateLabel = '倒地'; stateBg = 'background:#b71c1c;color:#ffcdd2;'; }
+        else if (p.state === 'shooting') { stateLabel = '开火'; stateBg = 'background:#b71c1c;color:#ffebee;'; }
+        else if (p.state === 'reloading') { stateLabel = '换弹'; stateBg = 'background:#e65100;color:#fff3e0;'; }
+        else if (p.state === 'healing_shield') { stateLabel = '打电'; stateBg = 'background:#0d47a1;color:#e3f2fd;'; }
+        else if (p.state === 'healing_hp') { stateLabel = '打药'; stateBg = 'background:#1b5e20;color:#e8f5e9;'; }
+        else if (p.state === 'reviving') { stateLabel = '救援'; stateBg = 'background:#4a148c;color:#f3e5f5;'; }
+        else if (p.state === 'in_cover') { stateLabel = '掩体'; stateBg = 'background:#3e2723;color:#efebe9;'; }
+        else { stateLabel = '空闲'; stateBg = 'background:#1b5e20;color:#e8f5e9;'; }
+
+        let targetHtml = '';
+        if (p.state === 'shooting' && p._lastTargetName) {
+            targetHtml = `<div style="font-size:10px;color:#ffca28;margin-top:2px;">➤ 攻击 ${p._lastTargetName}</div>`;
+        } else if (p.state === 'reviving' && p.revivingTargetId) {
+            const targetPlayer = teamCtx.players.find(tp => tp.id === p.revivingTargetId);
+            const targetName = targetPlayer ? targetPlayer.name : p.revivingTargetId;
+            targetHtml = `<div style="font-size:10px;color:#ce93d8;margin-top:2px;">➤ 拉起 ${targetName}</div>`;
+        }
+
+        let magHtml = '';
+        if (p.state === 'shooting') {
+            magHtml = `<span style="color:#ffca28;font-size:10px;margin-left:4px;">🔫${mag}</span>`;
+        }
+
+        return `
+        <div class="combat-player-card ${isDead?'dead':''}" style="${isDown?'border-color:#b71c1c;':''}">
+            <div class="combat-player-name" style="${nameColor}">${p.name}${magHtml}</div>
+            <div class="combat-bars">
+                <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%;"></div></div>
+                ${shieldPct > 0 ? `<div class="shield-bar-bg"><div class="shield-bar-fill" style="width:${Math.min(100, shieldPct*2)}%;"></div></div>` : '<div style="height:2px;"></div>'}
+            </div>
+            <div class="combat-meta">
+                <span class="combat-state-badge" style="${stateBg}">${stateLabel}</span>
+                <span style="font-size:10px;color:#aaa;">♥${hpPct.toFixed(0)} ${shieldPct>0?`🛡${shieldPct}`:''}</span>
+            </div>
+            ${targetHtml}
+        </div>`;
+    };
+
+    // 非交火 / 死亡状态：简洁卡片布局
+    if (t.status !== 'fight') {
+        let cards = t.status === 'dead' ? '' : t.players.map(p => renderCard(p, t, false)).join('');
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong>${t.name}</strong>
+                <span style="font-size:11px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}</span>
+            </div>
+            <div style="font-size:12px; color:#aaa; margin-bottom:8px;">[${statusText}]</div>
+            <div class="combat-sides" style="flex-direction:column; gap:6px;">
+                ${cards || '<div style="color:#777;">全员淘汰</div>'}
+            </div>
+        `;
+    }
+
+    // 交火状态：对阵面板
+    let myCombat = state.combats.find(c => c.teams.includes(t.id));
+    let enemyIds = myCombat ? myCombat.teams.filter(id => id !== t.id) : [];
+    let enemyTeams = enemyIds.map(id => state.teams[id]).filter(et => et && et.status !== 'dead');
+    let enemyNames = enemyTeams.map(et => et.name).join(' & ');
+
+    let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
+    let enemyCards = enemyTeams.map(et => {
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}</div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+    }).join('');
+
+    return `
+        <div class="combat-arena">
+            <div class="combat-vs-header">
+                <span style="color:#81c784;">${t.name}</span>
+                <span style="color:#f44336;margin:0 6px;">⚔ VS ⚔</span>
+                <span style="color:#ff8a80;">${enemyNames || '???'}</span>
+            </div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}</div>
+            <div class="combat-sides">
+                <div class="combat-side">
+                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}</div>
+                    ${allyCards}
+                </div>
+                <div class="combat-side">
+                    <div class="combat-side-title" style="color:#f44336;">敌方 ${enemyNames || '???'}</div>
+                    ${enemyCards || '<div style="color:#777;font-size:12px;text-align:center;">无情报</div>'}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderBRState(state, tournament) {
     let aliveCount = state.aliveTeamsCount;
     document.getElementById('mapStatus').innerHTML = `
@@ -248,6 +353,7 @@ function renderBRState(state, tournament) {
     // ==== 地图渲染结束 ====
 
     const _stateLabel = (p) => {
+        if (p.isDead || p.state === 'dead') return '<span style="color:#777;">💀淘汰</span>';
         if (p.isDown) return '<span style="color:#f44336;">倒地</span>';
         const labels = { idle:'空闲', shooting:'🔥开火', reloading:'🔄换弹', healing_shield:'🔋打电', healing_hp:'💉打药', reviving:'🤝救援', 'in_cover':'🛡️缩掩体' };
         return labels[p.state] || p.state;
@@ -309,7 +415,8 @@ function renderBRState(state, tournament) {
                             let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
                             let stateLabel = '';
                             let stateColor = '#888';
-                            if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
+                            if (p.isDead || p.state === 'dead') { stateLabel = '💀淘汰'; stateColor = '#777'; }
+                            else if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
                             else if (p.state === 'shooting') { stateLabel = '开火中'; stateColor = '#f44336'; }
                             else if (p.state === 'reloading') { stateLabel = '换弹'; stateColor = '#ff9800'; }
                             else if (p.state === 'healing_shield') { stateLabel = '打电'; stateColor = '#2196f3'; }
@@ -346,7 +453,8 @@ function renderBRState(state, tournament) {
                 let mag = p.magAmmo !== undefined ? p.magAmmo : '-';
                 let stateLabel = '';
                 let stateColor = '#888';
-                if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
+                if (p.isDead || p.state === 'dead') { stateLabel = '💀淘汰'; stateColor = '#777'; }
+                else if (p.isDown) { stateLabel = '倒地'; stateColor = '#f44336'; }
                 else if (p.state === 'shooting') { stateLabel = '开火中'; stateColor = '#f44336'; }
                 else if (p.state === 'reloading') { stateLabel = '换弹'; stateColor = '#ff9800'; }
                 else if (p.state === 'healing_shield') { stateLabel = '打电'; stateColor = '#2196f3'; }
@@ -378,19 +486,7 @@ function renderBRState(state, tournament) {
             playersCards = '<div style="color:#777; margin-top:8px;">全员淘汰</div>';
         }
         
-        let tourTeam = tournament.teams[t.id];
-        let mpText = tourTeam.IsMatchPointEligible ? '<span class="match-point-fire">🔥赛点队伍</span>' : `积分: ${tourTeam.TotalScore}`;
-
-        document.getElementById('liveTeamStatus').innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <strong>${t.name}</strong>
-                <span style="font-size:12px;">${mpText} | 击杀: ${t.kills} | 装备: ${t.equipValue}</span>
-            </div>
-            <div style="margin-top:4px; font-size:14px;">[${statusText}]</div>
-            ${combatInfo}
-            ${enemyCards}
-            ${playersCards}
-        `;
+        document.getElementById('liveTeamStatus').innerHTML = renderCombatStatusHTML(state, tournament, t);
 
         const logsContainer = document.getElementById('liveTeamLogs');
         const liveTtsEnabled = document.getElementById('liveTtsToggle').checked;

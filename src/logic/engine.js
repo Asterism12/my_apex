@@ -33,7 +33,7 @@ function initTournament(payload) {
         status: 'IN_PROGRESS',
         championTeamId: null,
         teams: teams,
-        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : 2 }
+        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : 3 }
     };
 
     return tournamentState;

@@ -210,6 +210,10 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
     if (isHeadshot) {
         _tryAddComm(attackerTeam, 'HEADSHOT', tick, attackerPlayer.name, targetTeam.name);
     }
+
+    // 记录当前射击目标，供前端UI展示
+    attackerPlayer._lastTargetName = targetPlayer.name;
+    attackerPlayer._lastTargetTeam = targetTeam.name;
 }
 
 function _tryAddComm(team, type, tick, speakerName, targetName) {
@@ -240,6 +244,8 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
         if (player.stateTimer <= 0) {
             player.burstTotalTicks = 0;
             player.burstShotsLeft = 0;
+            player._lastTargetName = null;
+            player._lastTargetTeam = null;
             if (!player.isDown) {
                 // design doc: shooting → 弹匣空 → reloading；否则回到 idle
                 if (player.magAmmo <= 0) {

@@ -93,3 +93,94 @@ h1, h3 {
     background-color: rgba(33, 150, 243, 0.3);
     border-left: 4px solid #2196f3;
 }
+
+/* ========== 图形化战斗对阵面板 ========== */
+.combat-arena {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 10px;
+    border: 1px solid #333;
+}
+.combat-vs-header {
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #333;
+}
+.combat-sides {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+.combat-side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.combat-side-title {
+    font-size: 11px;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.combat-player-card {
+    background: #252525;
+    border-radius: 6px;
+    padding: 8px;
+    border: 1px solid #333;
+    transition: border-color 0.2s;
+}
+.combat-player-card.dead {
+    opacity: 0.45;
+    border-color: #444;
+}
+.combat-player-name {
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.combat-bars {
+    margin-bottom: 4px;
+}
+.hp-bar-bg, .shield-bar-bg {
+    width: 100%;
+    height: 5px;
+    background: #333;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 3px;
+}
+.hp-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #f44336, #ff8a80);
+    border-radius: 3px;
+    transition: width 0.2s ease;
+}
+.shield-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2196f3, #03a9f4);
+    border-radius: 3px;
+    transition: width 0.2s ease;
+}
+.combat-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+}
+.combat-state-badge {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: bold;
+    font-size: 10px;
+    white-space: nowrap;
+}
