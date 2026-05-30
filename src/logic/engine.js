@@ -177,11 +177,16 @@ function processBRTick(state) {
         let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t && t.status !== 'dead');
 
         if (fightingTeams.length <= 1) {
+            combat.teams.forEach(tid => {
+                let t = newState.teams[tid];
+                if (t && t.status !== 'dead') {
+                    t.status = 'loot';
+                    t.equipValue = Math.min(100, t.equipValue + 20);
+                    _restoreTeamAfterCombat(t, newState.tick, newState.logs);
+                }
+            });
             if (fightingTeams.length === 1) {
-                let winner = fightingTeams[0];
-                winner.status = 'loot';
-                winner.equipValue = Math.min(100, winner.equipValue + 20);
-                newState.logs.push(`[Tick ${newState.tick}] 🏆 ${winner.name} 赢得了该区域的战斗！`);
+                newState.logs.push(`[Tick ${newState.tick}] 🏆 ${fightingTeams[0].name} 赢得了该区域的战斗！`);
             }
         } else {
             let result = processCombatTickV2(combat, newState.teams, newState.tick, newState);
@@ -194,11 +199,16 @@ function processBRTick(state) {
             });
 
             if (result.combatEnded) {
+                combat.teams.forEach(tid => {
+                    let t = newState.teams[tid];
+                    if (t && t.status !== 'dead') {
+                        t.status = 'loot';
+                        t.equipValue = Math.min(100, t.equipValue + 20);
+                        _restoreTeamAfterCombat(t, newState.tick, newState.logs);
+                    }
+                });
                 if (result.winnerTeamId) {
-                    let winner = newState.teams[result.winnerTeamId];
-                    winner.status = 'loot';
-                    winner.equipValue = Math.min(100, winner.equipValue + 20);
-                    newState.logs.push(`[Tick ${newState.tick}] 🏆 ${winner.name} 赢得了该区域的战斗！`);
+                    newState.logs.push(`[Tick ${newState.tick}] 🏆 ${newState.teams[result.winnerTeamId].name} 赢得了该区域的战斗！`);
                 }
             } else {
                 finalCombats.push(combat);
@@ -280,6 +290,34 @@ function checkTeamAlive(team, state) {
         } else {
             state.logs.push(`💀 [淘汰] ${team.name} 已被全数淘汰。 剩余队伍: ${remaining}`);
         }
+    }
+}
+
+function _restoreTeamAfterCombat(team, tick, logs) {
+    let revivedCount = 0;
+    team.players.forEach(p => {
+        if (p.isDown || p.isDead || p.hp < 100 || (p.shield !== undefined && p.shield < 50)) {
+            if (p.isDown || p.isDead) revivedCount++;
+        }
+        p.hp = 100;
+        p.shield = 50;
+        p.magAmmo = 20;
+        p.state = 'idle';
+        p.stateTimer = 0;
+        p.downTimer = 0;
+        p.isDown = false;
+        p.isDead = false;
+        p.revivingTargetId = null;
+        p.burstTotalTicks = 0;
+        p.burstShotsLeft = 0;
+        p._hitsThisTick = 0;
+        p._lastTargetName = null;
+        p._lastTargetTeam = null;
+    });
+    if (revivedCount > 0) {
+        logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，${revivedCount} 名队员复活并恢复满状态！`);
+    } else {
+        logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，全员恢复满状态！`);
     }
 }
 
