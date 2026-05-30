@@ -7,9 +7,22 @@ let currentTickSpeed = 150;
 let originalTickSpeed = 150;
 let autoSpectateMode = false;
 let originalTtsChecked = true;
+let isPaused = false;
 
 let followedTeamId = null;
 let lastFollowedCommIndex = 0;
+let isTourBoardExpanded = false;
+
+function setTourBoardExpanded(expanded) {
+    isTourBoardExpanded = expanded;
+    document.getElementById('tourBoardBody').style.display = isTourBoardExpanded ? 'block' : 'none';
+    document.getElementById('tourToggleIcon').textContent = isTourBoardExpanded ? '▲' : '▼';
+    document.getElementById('tourToggleText').textContent = isTourBoardExpanded ? '收起' : '展开';
+}
+
+document.getElementById('tourBoardHeader').addEventListener('click', () => {
+    setTourBoardExpanded(!isTourBoardExpanded);
+});
 
 document.getElementById('startBtn').addEventListener('click', () => {
     currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
@@ -20,9 +33,15 @@ document.getElementById('startBtn').addEventListener('click', () => {
     const response = sendBRAction({ type: 'START_TOURNAMENT', payload: { shrinkSpeed, customTeams } });
     if (response.success) {
         document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('matchControls').style.display = 'block';
+        document.getElementById('pauseBtn').style.display = 'inline-block';
+        document.getElementById('pauseBtn').textContent = '⏸️ 暂停';
         document.getElementById('fastForwardBtn').style.display = 'inline-block';
         document.getElementById('autoSpectateBtn').style.display = 'inline-block';
+        document.getElementById('nextMatchBtn').style.display = 'none';
+        isPaused = false;
         document.getElementById('tourBoard').style.display = 'block';
+        setTourBoardExpanded(false);
         document.getElementById('battleArea').style.display = 'block';
         
         setupMatch(response.state, response.tournament);
@@ -32,11 +51,20 @@ document.getElementById('startBtn').addEventListener('click', () => {
     }
 });
 
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    isPaused = !isPaused;
+    document.getElementById('pauseBtn').textContent = isPaused ? '▶️ 恢复' : '⏸️ 暂停';
+});
+
 document.getElementById('nextMatchBtn').addEventListener('click', () => {
-    document.getElementById('nextMatchBtn').style.display = 'none';
-    document.getElementById('commsReview').style.display = 'none';
+    document.getElementById('matchControls').style.display = 'block';
+    document.getElementById('pauseBtn').style.display = 'inline-block';
     document.getElementById('fastForwardBtn').style.display = 'inline-block';
     document.getElementById('autoSpectateBtn').style.display = 'inline-block';
+    document.getElementById('nextMatchBtn').style.display = 'none';
+    document.getElementById('commsReview').style.display = 'none';
+    document.getElementById('pauseBtn').textContent = '⏸️ 暂停';
+    isPaused = false;
     autoSpectateMode = false;
     
     currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
@@ -51,7 +79,7 @@ document.getElementById('nextMatchBtn').addEventListener('click', () => {
 });
 
 document.getElementById('fastForwardBtn').addEventListener('click', () => {
-    currentTickSpeed = 10; // Set to very fast
+    currentTickSpeed = 5; // 2x faster than before
     runBRSimulation();
 });
 
@@ -59,7 +87,7 @@ document.getElementById('autoSpectateBtn').addEventListener('click', () => {
     if (autoSpectateMode) return;
     originalTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
     originalTtsChecked = document.getElementById('liveTtsToggle').checked;
-    currentTickSpeed = 10;
+    currentTickSpeed = 5; // 2x faster than before
     autoSpectateMode = true;
     document.getElementById('liveTtsToggle').checked = false;
     document.getElementById('autoSpectateBtn').textContent = '⏩ 自动观战进行中...';
@@ -73,6 +101,7 @@ function setupMatch(state, tournament) {
     autoSpectateMode = false;
     document.getElementById('autoSpectateBtn').textContent = '🎯 快进至交火';
     document.getElementById('autoSpectateBtn').style.background = '#9c27b0';
+    setTourBoardExpanded(false);
     
     renderTournamentBoard(tournament);
 
@@ -141,17 +170,23 @@ function runBRSimulation() {
     if (simInterval) clearInterval(simInterval);
 
     simInterval = setInterval(() => {
+        if (isPaused) return;
         const response = sendBRAction({ type: 'TICK' });
         
         if (response.success) {
             renderBRState(response.state, response.tournament);
             if (response.state.status !== 'running') {
                 clearInterval(simInterval);
+                document.getElementById('matchControls').style.display = 'block';
+                document.getElementById('pauseBtn').style.display = 'none';
                 document.getElementById('fastForwardBtn').style.display = 'none';
                 document.getElementById('autoSpectateBtn').style.display = 'none';
+                isPaused = false;
                 autoSpectateMode = false;
                 renderTournamentBoard(response.tournament); // 最终更新计分板
+                setTourBoardExpanded(true);
                 if(response.tournament.status === 'FINISHED') {
+                    document.getElementById('nextMatchBtn').style.display = 'none';
                     // tournament over
                 } else {
                     document.getElementById('nextMatchBtn').style.display = 'inline-block';
@@ -243,13 +278,25 @@ function renderCombatStatusHTML(state, tournament, t) {
     let enemyTeams = enemyIds.map(id => state.teams[id]).filter(et => et && et.status !== 'dead');
     let enemyNames = enemyTeams.map(et => et.name).join(' & ');
 
+    const _calcTerrainValue = (team) => {
+        let base = team.terrain !== undefined ? team.terrain : 50;
+        let bonus = (team.microTerrain && team.microTerrain.terrainBonus !== undefined) ? team.microTerrain.terrainBonus : 0;
+        return base + bonus;
+    };
+    let myTerrainVal = _calcTerrainValue(t);
+
     let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
     let enemyCards = enemyTeams.map(et => {
         let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
-        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain}</div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+        let etTerrainVal = _calcTerrainValue(et);
+        let diff = myTerrainVal - etTerrainVal;
+        let diffColor = diff > 0 ? '#4caf50' : (diff < 0 ? '#f44336' : '#aaa');
+        let diffText = diff > 0 ? `+${diff}` : `${diff}`;
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span></span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
     }).join('');
 
     let myTerrainLabel = t.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${t.microTerrain.name}</span>` : '';
+    myTerrainLabel += ` <span style="color:#aaa;font-weight:normal;">(地形值:${myTerrainVal})</span>`;
     let macroLabel = '';
     if (myCombat && myCombat.macroTerrain) {
         let mName = myCombat.macroTerrain === 'urban' ? '城区' : (myCombat.macroTerrain === 'hills' ? '丘陵' : '开阔地');
@@ -636,7 +683,6 @@ class CommTTSPlayer {
             const el = document.getElementById(nextItem.elId);
             if (el) {
                 el.classList.add('comm-highlight');
-                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         };
         
@@ -681,7 +727,6 @@ class CommTTSPlayer {
             const el = document.getElementById(`comm-${this.currentIndex}`);
             if (el) {
                 el.classList.add('comm-highlight');
-                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         };
         

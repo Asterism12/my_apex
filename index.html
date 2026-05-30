@@ -28,24 +28,36 @@
         </div>
 
         <button id="startBtn">启动赛事</button>
-        <button id="fastForwardBtn" style="display:none; background:#e91e63;">⏩ 快速结束本局</button>
-        <button id="autoSpectateBtn" style="display:none; background:#9c27b0;">🎯 快进至交火</button>
-        <button id="nextMatchBtn" style="display:none; background:#ff9800;">开始下一局 (Match) >></button>
 
         <div class="tour-board" id="tourBoard" style="display:none;">
-            <h3 id="tourTitle" style="color:#2196f3; margin-top:0;">赛事总积分榜 - Match 0</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>排名</th>
-                        <th>队伍</th>
-                        <th>总积分</th>
-                        <th>总击杀</th>
-                        <th>赛点状态</th>
-                    </tr>
-                </thead>
-                <tbody id="tourTableBody"></tbody>
-            </table>
+            <div id="tourBoardHeader" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;">
+                <h3 id="tourTitle" style="color:#2196f3; margin:0;">赛事总积分榜 - Match 0</h3>
+                <div id="tourToggleBtn" style="display:flex; align-items:center; gap:6px; background:#444; padding:5px 12px; border-radius:6px; font-size:13px; color:#fff; border:1px solid #666;">
+                    <span id="tourToggleIcon" style="font-size:12px; transition: transform 0.2s;">▼</span>
+                    <span id="tourToggleText">收起</span>
+                </div>
+            </div>
+            <div id="tourBoardBody" style="display:none; margin-top:10px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>队伍</th>
+                            <th>总积分</th>
+                            <th>总击杀</th>
+                            <th>赛点状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tourTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="matchControls" style="display:none; margin-top: 15px; margin-bottom: 20px;">
+            <button id="pauseBtn" style="background:#607d8b;">⏸️ 暂停</button>
+            <button id="fastForwardBtn" style="background:#e91e63;">⏩ 快速结束本局</button>
+            <button id="autoSpectateBtn" style="background:#9c27b0;">🎯 快进至交火</button>
+            <button id="nextMatchBtn" style="background:#ff9800;">开始下一局 (Match) >></button>
         </div>
 
         <div class="battle-area" style="display:none;" id="battleArea">
