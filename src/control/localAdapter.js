@@ -23,6 +23,11 @@ function sendBRAction(actionConfig) {
             return { success: true, state: _brGameState, tournament: tournamentState };
         }
 
+        if (actionConfig.type === 'GET_STATE') {
+            if (!_brGameState) return { success: false, error: '状态未初始化' };
+            return { success: true, state: _brGameState, tournament: tournamentState };
+        }
+
         return { success: false, error: `Unknown Action` };
     } catch (e) {
         return { success: false, error: e.message };

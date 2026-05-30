@@ -11,24 +11,29 @@ function _getAttr(team, attr, defaultVal) {
 }
 
 function _initCombatV2(combat, allTeams) {
-    if (combat.v2Initialized) return;
-
     let fightingTeams = combat.teams.map(tid => allTeams[tid]).filter(t => t && t.status !== 'dead');
 
     fightingTeams.forEach(team => {
-        team._v2AimCoeff = _getAttr(team, 'aim', 50) / 50;
-        team._v2ExpBase = 1 + 0.005 * _getAttr(team, 'experience', 50);
+        // 首次初始化时设置队伍系数
+        if (team._v2AimCoeff === undefined) {
+            team._v2AimCoeff = _getAttr(team, 'aim', 50) / 50;
+            team._v2ExpBase = 1 + 0.005 * _getAttr(team, 'experience', 50);
+        }
 
         team.players.forEach(p => {
-            p.shield = 50;
-            p.magAmmo = 20;
-            p.state = 'idle';
-            p.stateTimer = 0;
-            p.downTimer = 0;
-            p.burstTotalTicks = 0;
-            p.burstShotsLeft = 0;
-            p.revivingTargetId = null;
-            p._hitsThisTick = 0;
+            // 缺少 v2 属性说明是后续劝架加入的队员，需要补初始化
+            if (p.shield === undefined || p.magAmmo === undefined) {
+                p.shield = 50;
+                p.magAmmo = 20;
+                p.state = 'idle';
+                p.stateTimer = 0;
+                p.downTimer = 0;
+                p.isDead = false;
+                p.burstTotalTicks = 0;
+                p.burstShotsLeft = 0;
+                p.revivingTargetId = null;
+                p._hitsThisTick = 0;
+            }
         });
     });
 
@@ -42,7 +47,7 @@ function _getAliveEnemyPlayers(combat, allTeams, myTeamId) {
         let t = allTeams[tid];
         if (!t || t.status === 'dead') return;
         t.players.forEach(p => {
-            if (!p.isDown && p.hp > 0) enemies.push({ player: p, team: t });
+            if (!p.isDead && !p.isDown && p.hp > 0) enemies.push({ player: p, team: t });
         });
     });
     return enemies;
@@ -55,7 +60,7 @@ function _getAllEnemyPlayers(combat, allTeams, myTeamId) {
         let t = allTeams[tid];
         if (!t || t.status === 'dead') return;
         t.players.forEach(p => {
-            if (p.hp > 0) enemies.push({ player: p, team: t });
+            if (!p.isDead && p.hp > 0) enemies.push({ player: p, team: t });
         });
     });
     return enemies;
@@ -179,11 +184,15 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
             if (targetPlayer.isDown) {
                 // 补人
                 targetPlayer.isDown = false;
+                targetPlayer.isDead = true;
+                targetPlayer.state = 'dead';
                 logMsg = `[Tick ${tick}] 💀 ${attackerTeam.name}-${attackerPlayer.name} 补掉了 ${targetTeam.name}-${targetPlayer.name}！`;
                 _tryAddComm(attackerTeam, 'EXECUTION', tick, attackerPlayer.name, targetTeam.name);
             } else {
                 // 首次击倒
                 targetPlayer.isDown = true;
+                targetPlayer.state = 'downed';
+                targetPlayer.stateTimer = 0;
                 let expVal = _getAttr(targetTeam, 'experience', 50);
                 targetPlayer.downTimer = Math.floor(100 + expVal * 0.5);
                 attackerTeam.kills++;
@@ -210,6 +219,12 @@ function _tryAddComm(team, type, tick, speakerName, targetName) {
 }
 
 function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
+    // 倒地队员强制锁定状态，不再执行任何主动行为
+    if (player.isDown) {
+        player.state = 'downed';
+        return;
+    }
+
     // 1. 状态倒计时递减
     if (player.stateTimer > 0) {
         player.stateTimer--;
@@ -223,9 +238,19 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
             player.burstShotsLeft--;
         }
         if (player.stateTimer <= 0) {
-            player.state = 'idle';
             player.burstTotalTicks = 0;
             player.burstShotsLeft = 0;
+            if (!player.isDown) {
+                // design doc: shooting → 弹匣空 → reloading；否则回到 idle
+                if (player.magAmmo <= 0) {
+                    player.state = 'reloading';
+                    player.stateTimer = 18;
+                    player.magAmmo = 20;
+                    _tryAddComm(team, 'RELOAD', tick, player.name, '');
+                } else {
+                    player.state = 'idle';
+                }
+            }
         }
         return;
     }
@@ -245,6 +270,7 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
                 target.hp = 25;
                 target.shield = 0;
                 target.downTimer = 0;
+                target.state = 'idle';
                 _tryAddComm(team, 'REVIVE_SUCCESS', tick, player.name, target.name);
             }
             player.revivingTargetId = null;
@@ -266,12 +292,12 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
     }
 
     // 5. idle 状态下的主动决策
-    if (player.isDown || player.hp <= 0) return;
+    if (player.isDead || player.isDown || player.hp <= 0) return;
 
     let enemyAlive = _getAliveEnemyPlayers(combat, allTeams, team.id);
 
-    // a) 弹匣快空了，打光换弹
-    if (player.magAmmo <= 3 && player.magAmmo > 0) {
+    // a) 弹匣快空了，且场上存在可攻击目标，打光换弹
+    if (player.magAmmo <= 3 && player.magAmmo > 0 && enemyAlive.length > 0) {
         player.burstShotsLeft = player.magAmmo;
         player.burstTotalTicks = player.burstShotsLeft * 2;
         player.stateTimer = player.burstTotalTicks;
@@ -360,6 +386,8 @@ function processCombatTickV2(combat, teams, tick, state) {
                 if (p.downTimer <= 0) {
                     p.hp = 0;
                     p.isDown = false;
+                    p.isDead = true;
+                    p.state = 'dead';
                     logs.push(`[Tick ${tick}] 💀 ${t.name}-${p.name} 流血过久，已被淘汰。`);
                 }
             }
@@ -395,14 +423,13 @@ function processCombatTickV2(combat, teams, tick, state) {
         });
     });
 
-    // 5. 胜负判定
+    // 5. 胜负判定（全队倒地即判负，不再等待流血倒计时）
     let aliveTeams = [];
     combat.teams.forEach(tid => {
         let t = teams[tid];
         if (!t || t.status === 'dead') return;
-        let anyStanding = t.players.some(p => !p.isDown && p.hp > 0);
-        let anyDowned = t.players.some(p => p.isDown && p.downTimer > 0);
-        if (anyStanding || anyDowned) {
+        let anyStanding = t.players.some(p => !p.isDead && !p.isDown && p.hp > 0);
+        if (anyStanding) {
             aliveTeams.push(t);
         }
     });

@@ -3,14 +3,16 @@
  */
 
 let simInterval = null;
-let currentTickSpeed = 300;
+let currentTickSpeed = 150;
+let originalTickSpeed = 150;
+let autoSpectateMode = false;
 
 let followedTeamId = null;
 let lastFollowedCommIndex = 0;
 
 document.getElementById('startBtn').addEventListener('click', () => {
-    currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 300;
-    const shrinkSpeed = parseInt(document.getElementById('shrinkSpeed').value) || 10;
+    currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
+    const shrinkSpeed = parseInt(document.getElementById('shrinkSpeed').value) || 3;
 
     const customTeams = typeof APEX_TEAMS !== 'undefined' ? APEX_TEAMS : null;
 
@@ -18,6 +20,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
     if (response.success) {
         document.getElementById('startBtn').style.display = 'none';
         document.getElementById('fastForwardBtn').style.display = 'inline-block';
+        document.getElementById('autoSpectateBtn').style.display = 'inline-block';
         document.getElementById('tourBoard').style.display = 'block';
         document.getElementById('battleArea').style.display = 'block';
         
@@ -32,8 +35,10 @@ document.getElementById('nextMatchBtn').addEventListener('click', () => {
     document.getElementById('nextMatchBtn').style.display = 'none';
     document.getElementById('commsReview').style.display = 'none';
     document.getElementById('fastForwardBtn').style.display = 'inline-block';
+    document.getElementById('autoSpectateBtn').style.display = 'inline-block';
+    autoSpectateMode = false;
     
-    currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 300;
+    currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
     
     const response = sendBRAction({ type: 'NEXT_MATCH' });
     if(response.success) {
@@ -49,9 +54,23 @@ document.getElementById('fastForwardBtn').addEventListener('click', () => {
     runBRSimulation();
 });
 
+document.getElementById('autoSpectateBtn').addEventListener('click', () => {
+    if (autoSpectateMode) return;
+    originalTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
+    currentTickSpeed = 10;
+    autoSpectateMode = true;
+    document.getElementById('liveTtsToggle').checked = false;
+    document.getElementById('autoSpectateBtn').textContent = '⏩ 自动观战进行中...';
+    document.getElementById('autoSpectateBtn').style.background = '#673ab7';
+    runBRSimulation();
+});
+
 function setupMatch(state, tournament) {
     document.getElementById('logs').innerHTML = ''; 
     document.getElementById('liveTeamLogs').innerHTML = '';
+    autoSpectateMode = false;
+    document.getElementById('autoSpectateBtn').textContent = '🎯 快进至交火';
+    document.getElementById('autoSpectateBtn').style.background = '#9c27b0';
     
     renderTournamentBoard(tournament);
 
@@ -106,8 +125,14 @@ function renderTournamentBoard(tournament) {
 document.getElementById('followTeamSelect').addEventListener('change', (e) => {
     followedTeamId = e.target.value;
     document.getElementById('liveTeamLogs').innerHTML = ''; 
-    lastFollowedCommIndex = 0; 
     ttsPlayer.stop();
+    
+    const response = sendBRAction({ type: 'GET_STATE' });
+    if (response.success && response.state.teams[followedTeamId]) {
+        lastFollowedCommIndex = response.state.teams[followedTeamId].comms.length;
+    } else {
+        lastFollowedCommIndex = 0;
+    }
 });
 
 function runBRSimulation() {
@@ -121,6 +146,8 @@ function runBRSimulation() {
             if (response.state.status !== 'running') {
                 clearInterval(simInterval);
                 document.getElementById('fastForwardBtn').style.display = 'none';
+                document.getElementById('autoSpectateBtn').style.display = 'none';
+                autoSpectateMode = false;
                 renderTournamentBoard(response.tournament); // 最终更新计分板
                 if(response.tournament.status === 'FINISHED') {
                     // tournament over
@@ -148,7 +175,7 @@ function renderBRState(state, tournament) {
 
     // ==== 渲染大地图 ====
     const MAP_SIZE = 400;
-    const MAP_RATIO = MAP_SIZE / 1000;
+    const MAP_RATIO = MAP_SIZE / 2000;
     const ringEl = document.getElementById('miniMapRing');
     let rR = state.ring.radius * MAP_RATIO;
     let rX = state.ring.x * MAP_RATIO - rR;
@@ -245,6 +272,17 @@ function renderBRState(state, tournament) {
 
     if (followedTeamId && state.teams[followedTeamId]) {
         const t = state.teams[followedTeamId];
+
+        // 自动观战模式：跟踪队伍进入交火时恢复原速和语音
+        if (autoSpectateMode && t.status === 'fight') {
+            autoSpectateMode = false;
+            currentTickSpeed = originalTickSpeed;
+            document.getElementById('liveTtsToggle').checked = true;
+            document.getElementById('autoSpectateBtn').textContent = '🎯 快进至交火';
+            document.getElementById('autoSpectateBtn').style.background = '#9c27b0';
+            runBRSimulation();
+        }
+
         let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '🔥 交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
         
         // 战斗详情：若正在交火，显示敌方信息

@@ -33,7 +33,7 @@ function initTournament(payload) {
         status: 'IN_PROGRESS',
         championTeamId: null,
         teams: teams,
-        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : 10 }
+        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : 2 }
     };
 
     return tournamentState;
@@ -43,13 +43,13 @@ function initMatch() {
     tournamentState.matchCount++;
     let teamsData = {};
     Object.values(tournamentState.teams).forEach(t => {
-        let spawnR = Math.random() * 460;
+        let spawnR = Math.random() * 900;
         let spawnAngle = Math.random() * Math.PI * 2;
         teamsData[t.id] = {
             id: t.id,
             name: t.name,
-            x: Math.floor(500 + spawnR * Math.cos(spawnAngle)),
-            y: Math.floor(500 + spawnR * Math.sin(spawnAngle)),
+            x: Math.floor(1000 + spawnR * Math.cos(spawnAngle)),
+            y: Math.floor(1000 + spawnR * Math.sin(spawnAngle)),
             status: 'loot',
             equipValue: 0,
             aggro: t.IsMatchPointEligible ? 20 : (Math.floor(Math.random() * 50) + 50),
@@ -76,7 +76,7 @@ function initMatch() {
     return {
         tick: 0,
         status: 'running',
-        ring: { x: 500, y: 500, radius: 500, stage: 1 },
+        ring: { x: 1000, y: 1000, radius: 1000, stage: 1 },
         teams: teamsData,
         combats: [],
         logs: initLogs,
@@ -122,8 +122,8 @@ function processBRTick(state) {
                 if (team.equipValue < 100) team.equipValue += 1;
                 team.status = 'loot';
                 addTeamComm(team, 'LOOT', newState.tick);
-                team.x += (Math.random() - 0.5) * 20;
-                team.y += (Math.random() - 0.5) * 20;
+                team.x += (Math.random() - 0.5) * 40;
+                team.y += (Math.random() - 0.5) * 40;
             }
         }
     });
@@ -257,10 +257,17 @@ function processBRTick(state) {
 
 function checkTeamAlive(team, state) {
     if (team.status === 'dead') return;
-    let anyStanding = team.players.some(p => !p.isDown && p.hp > 0);
-    // v2 兼容：倒地的队员（downTimer > 0）也视为存活，给救援机会
-    let anyDowned = team.players.some(p => p.isDown && p.hp >= 0 && p.downTimer > 0);
-    if (!anyStanding && !anyDowned) {
+    let anyStanding = team.players.some(p => !p.isDead && !p.isDown && p.hp > 0);
+    if (!anyStanding) {
+        // 淘汰时清理所有残留队员状态
+        team.players.forEach(p => {
+            if (!p.isDead) {
+                p.isDead = true;
+                p.hp = 0;
+                p.isDown = false;
+                p.state = 'dead';
+            }
+        });
         team.placement = state.aliveTeamsCount;
         state.aliveTeamsCount--;
         team.status = 'dead';
