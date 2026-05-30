@@ -146,7 +146,6 @@ function processBRTick(state) {
     let aliveTeams = [];
     Object.values(newState.teams).forEach(team => {
         if (team.status === 'dead') return;
-        aliveTeams.push(team);
 
         let distToTarget = Math.hypot(team.x - newState.ring.x, team.y - newState.ring.y);
         if (distToTarget > newState.ring.radius) {
@@ -170,10 +169,14 @@ function processBRTick(state) {
                 team.y += (Math.random() - 0.5) * 40;
             }
         }
+
+        if (team.status !== 'dead') {
+            aliveTeams.push(team);
+        }
     });
 
     // 3. 战斗实例化与检测（相遇）
-    let availableTeams = aliveTeams.filter(t => t.status !== 'fight');
+    let availableTeams = aliveTeams.filter(t => t.status !== 'fight' && t.status !== 'dead');
     for (let i = 0; i < availableTeams.length; i++) {
         for (let j = i + 1; j < availableTeams.length; j++) {
             let t1 = availableTeams[i];
@@ -207,7 +210,7 @@ function processBRTick(state) {
     // 4. 劝架系统 (Third-party)
     newState.combats.forEach(combat => {
         aliveTeams.forEach(t => {
-            if (t.status !== 'fight') {
+            if (t.status !== 'fight' && t.status !== 'dead') {
                 let distToCombat = Math.hypot(t.x - combat.x, t.y - combat.y);
                 if (distToCombat < 200 && t.aggro > 50) { 
                     t.status = 'fight';
