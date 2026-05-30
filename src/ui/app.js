@@ -6,6 +6,7 @@ let simInterval = null;
 let currentTickSpeed = 150;
 let originalTickSpeed = 150;
 let autoSpectateMode = false;
+let originalTtsChecked = true;
 
 let followedTeamId = null;
 let lastFollowedCommIndex = 0;
@@ -57,6 +58,7 @@ document.getElementById('fastForwardBtn').addEventListener('click', () => {
 document.getElementById('autoSpectateBtn').addEventListener('click', () => {
     if (autoSpectateMode) return;
     originalTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
+    originalTtsChecked = document.getElementById('liveTtsToggle').checked;
     currentTickSpeed = 10;
     autoSpectateMode = true;
     document.getElementById('liveTtsToggle').checked = false;
@@ -411,7 +413,7 @@ function renderBRState(state, tournament) {
         if (autoSpectateMode && t.status === 'fight') {
             autoSpectateMode = false;
             currentTickSpeed = originalTickSpeed;
-            document.getElementById('liveTtsToggle').checked = true;
+            document.getElementById('liveTtsToggle').checked = originalTtsChecked;
             document.getElementById('autoSpectateBtn').textContent = '🎯 快进至交火';
             document.getElementById('autoSpectateBtn').style.background = '#9c27b0';
             runBRSimulation();
