@@ -2,6 +2,8 @@
  * 赛事大逃杀逻辑引擎（赛点制）
  */
 
+const DEFAULT_SHRINK_SPEED = 4;
+
 const PLACEMENT_SCORES = [0, 12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
 
 let tournamentState = null;
@@ -33,7 +35,7 @@ function initTournament(payload) {
         status: 'IN_PROGRESS',
         championTeamId: null,
         teams: teams,
-        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : 3 }
+        gameConfig: { shrinkSpeed: (payload && payload.shrinkSpeed !== undefined) ? parseInt(payload.shrinkSpeed) : DEFAULT_SHRINK_SPEED }
     };
 
     return tournamentState;
