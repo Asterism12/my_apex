@@ -6,14 +6,13 @@ let simInterval = null;
 let currentTickSpeed = 150;
 let originalTickSpeed = 150;
 let autoSpectateMode = false;
-const DEFAULT_SHRINK_SPEED = 4;
 
 let followedTeamId = null;
 let lastFollowedCommIndex = 0;
 
 document.getElementById('startBtn').addEventListener('click', () => {
     currentTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
-    const shrinkSpeed = parseInt(document.getElementById('shrinkSpeed').value) || DEFAULT_SHRINK_SPEED;
+    const shrinkSpeed = parseInt(document.getElementById('shrinkSpeed').value) || 4;
 
     const customTeams = typeof APEX_TEAMS !== 'undefined' ? APEX_TEAMS : null;
 
