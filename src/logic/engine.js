@@ -75,6 +75,45 @@ function initMatch() {
         initLogs.push(`[赛事播报] 当前有 ${eligibleCount} 支赛点队伍！冠军可能会在本局诞生！`);
     }
 
+    // 生成地图地形层 Zone（Urban > Hills > Open）
+    let terrainZones = [];
+    // Urban: 3 个，矩形 400~600 x 300~400
+    for (let i = 0; i < 3; i++) {
+        terrainZones.push({
+            x: Math.floor(200 + Math.random() * 1200),
+            y: Math.floor(200 + Math.random() * 1200),
+            width: 400 + Math.floor(Math.random() * 201),
+            height: 300 + Math.floor(Math.random() * 101),
+            type: 'urban',
+            color: '#1a237e',
+            priority: 3
+        });
+    }
+    // Hills: 3 个，矩形 350~500 x 350~500
+    for (let i = 0; i < 3; i++) {
+        terrainZones.push({
+            x: Math.floor(200 + Math.random() * 1200),
+            y: Math.floor(200 + Math.random() * 1200),
+            width: 350 + Math.floor(Math.random() * 151),
+            height: 350 + Math.floor(Math.random() * 151),
+            type: 'hills',
+            color: '#1b5e20',
+            priority: 2
+        });
+    }
+    // Open: 4 个，矩形 500~700 x 400~500
+    for (let i = 0; i < 4; i++) {
+        terrainZones.push({
+            x: Math.floor(100 + Math.random() * 1200),
+            y: Math.floor(100 + Math.random() * 1200),
+            width: 500 + Math.floor(Math.random() * 201),
+            height: 400 + Math.floor(Math.random() * 101),
+            type: 'open',
+            color: '#e65100',
+            priority: 1
+        });
+    }
+
     return {
         tick: 0,
         status: 'running',
@@ -82,7 +121,8 @@ function initMatch() {
         teams: teamsData,
         combats: [],
         logs: initLogs,
-        aliveTeamsCount: 20
+        aliveTeamsCount: 20,
+        terrainZones: terrainZones
     };
 }
 
@@ -121,7 +161,9 @@ function processBRTick(state) {
                 team.y -= (team.y - newState.ring.y) * 0.1;
                 team.status = 'move';
             } else {
-                if (team.equipValue < 100) team.equipValue += 1;
+                let macroTerrain = _getMacroTerrainAt(team.x, team.y, newState.terrainZones);
+                let lootRate = (macroTerrain === 'urban') ? 1.5 : 1;
+                if (team.equipValue < 100) team.equipValue = Math.min(100, team.equipValue + lootRate);
                 team.status = 'loot';
                 addTeamComm(team, 'LOOT', newState.tick);
                 team.x += (Math.random() - 0.5) * 40;
@@ -144,13 +186,19 @@ function processBRTick(state) {
                     addTeamComm(t1, 'ENGAGE_INFO', newState.tick + 1, t2.name);
                     addTeamComm(t2, 'ENGAGE_ALERT', newState.tick);
                     addTeamComm(t2, 'ENGAGE_INFO', newState.tick + 1, t1.name);
+                    let combatX = (t1.x + t2.x) / 2;
+                    let combatY = (t1.y + t2.y) / 2;
+                    let macroType = _getMacroTerrainAt(combatX, combatY, newState.terrainZones);
+                    t1.microTerrain = rollMicroTerrain(macroType);
+                    t2.microTerrain = rollMicroTerrain(macroType);
                     newState.combats.push({
                         id: `C_${t1.id}_${t2.id}`,
-                        x: (t1.x + t2.x) / 2,
-                        y: (t1.y + t2.y) / 2,
-                        teams: [t1.id, t2.id]
+                        x: combatX,
+                        y: combatY,
+                        teams: [t1.id, t2.id],
+                        macroTerrain: macroType
                     });
-                    newState.logs.push(`[Tick ${newState.tick}] 💥 ${t1.name} 与 ${t2.name} 遭遇，爆发战斗！`);
+                    newState.logs.push(`[Tick ${newState.tick}] 💥 ${t1.name} 与 ${t2.name} 遭遇，爆发战斗！（地形：${macroType === 'urban' ? '城区' : (macroType === 'hills' ? '丘陵' : '开阔地')}）`);
                 }
             }
         }
@@ -165,9 +213,11 @@ function processBRTick(state) {
                     t.status = 'fight';
                     t.x = combat.x; 
                     t.y = combat.y;
+                    let macroType = _getMacroTerrainAt(combat.x, combat.y, newState.terrainZones);
+                    t.microTerrain = rollMicroTerrain(macroType);
                     combat.teams.push(t.id);
                     addTeamComm(t, 'THIRD_PARTY', newState.tick);
-                    newState.logs.push(`[Tick ${newState.tick}] ⚠️ ${t.name} 被枪声吸引，化身“黄雀”加入了战斗！`);
+                    newState.logs.push(`[Tick ${newState.tick}] ⚠️ ${t.name} 被枪声吸引，化身“黄雀”加入了战斗！（地形：${macroType === 'urban' ? '城区' : (macroType === 'hills' ? '丘陵' : '开阔地')}）`);
                 }
             }
         });
@@ -316,11 +366,20 @@ function _restoreTeamAfterCombat(team, tick, logs) {
         p._lastTargetName = null;
         p._lastTargetTeam = null;
     });
+    team.microTerrain = null;
     if (revivedCount > 0) {
         logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，${revivedCount} 名队员复活并恢复满状态！`);
     } else {
         logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，全员恢复满状态！`);
     }
+}
+
+function _getMacroTerrainAt(x, y, zones) {
+    if (!zones || zones.length === 0) return 'open';
+    let matched = zones.filter(z => x >= z.x && x <= z.x + z.width && y >= z.y && y <= z.y + z.height);
+    if (matched.length === 0) return 'open';
+    matched.sort((a, b) => b.priority - a.priority);
+    return matched[0].type;
 }
 
 function addTeamComm(team, type, tick, targetName = "") {

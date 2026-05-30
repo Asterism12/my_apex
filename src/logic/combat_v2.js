@@ -10,6 +10,41 @@ function _getAttr(team, attr, defaultVal) {
     return team[attr] !== undefined ? team[attr] : (defaultVal !== undefined ? defaultVal : 50);
 }
 
+// ===== 微观地形层 =====
+const MICRO_TERRAIN_POOLS = {
+    urban: [
+        { name: '建筑内', prob: 0.30, terrainBonus: 15, coverTable: { idle: 0.6, shooting: 0.4, healing_shield: 0.2, healing_hp: 0.2, reviving: 0.2, in_cover: 0.2 } },
+        { name: '街道',   prob: 0.40, terrainBonus: 5,  coverTable: { idle: 1.0, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '楼顶',   prob: 0.20, terrainBonus: 20, coverTable: { idle: 0.6, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '窄巷',   prob: 0.10, terrainBonus: 10, coverTable: { idle: 0.6, shooting: 0.6, healing_shield: 0.25, healing_hp: 0.25, reviving: 0.25, in_cover: 0.25 } }
+    ],
+    hills: [
+        { name: '坡顶', prob: 0.25, terrainBonus: 20, coverTable: { idle: 0.6, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '坡腰', prob: 0.30, terrainBonus: 5,  coverTable: { idle: 1.0, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '坡底', prob: 0.20, terrainBonus: -10, coverTable: { idle: 1.0, shooting: 0.8, healing_shield: 0.6, healing_hp: 0.6, reviving: 0.6, in_cover: 0.6 } },
+        { name: '侧翼', prob: 0.25, terrainBonus: 0,  coverTable: { idle: 1.0, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } }
+    ],
+    open: [
+        { name: '岩石后',   prob: 0.25, terrainBonus: 5,  coverTable: { idle: 0.6, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '洼地',     prob: 0.25, terrainBonus: 0,  coverTable: { idle: 0.6, shooting: 0.6, healing_shield: 0.35, healing_hp: 0.35, reviving: 0.35, in_cover: 0.35 } },
+        { name: '完全暴露', prob: 0.30, terrainBonus: -15, coverTable: { idle: 1.0, shooting: 1.0, healing_shield: 1.0, healing_hp: 1.0, reviving: 1.0, in_cover: 1.0 } },
+        { name: '长草地',   prob: 0.20, terrainBonus: -5, coverTable: { idle: 0.8, shooting: 0.8, healing_shield: 0.6, healing_hp: 0.6, reviving: 0.6, in_cover: 0.6 } }
+    ]
+};
+
+function rollMicroTerrain(macroType) {
+    let pool = MICRO_TERRAIN_POOLS[macroType] || MICRO_TERRAIN_POOLS.open;
+    let roll = Math.random();
+    let acc = 0;
+    for (let item of pool) {
+        acc += item.prob;
+        if (roll < acc) {
+            return { ...item };
+        }
+    }
+    return { ...pool[pool.length - 1] };
+}
+
 function _initCombatV2(combat, allTeams) {
     let fightingTeams = combat.teams.map(tid => allTeams[tid]).filter(t => t && t.status !== 'dead');
 
@@ -69,21 +104,29 @@ function _getAllEnemyPlayers(combat, allTeams, myTeamId) {
 function _getTerrainDiff(atkTeam, defTeam) {
     let atkTerrain = _getAttr(atkTeam, 'terrain', 50);
     let defTerrain = _getAttr(defTeam, 'terrain', 50);
-    return atkTerrain - defTerrain;
+    let atkBonus = (atkTeam.microTerrain && atkTeam.microTerrain.terrainBonus) ? atkTeam.microTerrain.terrainBonus : 0;
+    let defBonus = (defTeam.microTerrain && defTeam.microTerrain.terrainBonus) ? defTeam.microTerrain.terrainBonus : 0;
+    return (atkTerrain + atkBonus) - (defTerrain + defBonus);
 }
 
-function _getCoverMultiplier(defenderPlayer) {
+function _getCoverMultiplier(defTeam, defenderPlayer) {
+    let defaultCover = 1.0;
     switch (defenderPlayer.state) {
-        case 'shooting': return 0.6;
+        case 'shooting': defaultCover = 0.6; break;
         case 'healing_shield':
         case 'healing_hp':
         case 'in_cover':
-            return 0.35;
+            defaultCover = 0.35; break;
         case 'reviving':
-            return 0.35;
+            defaultCover = 0.35; break;
         default:
-            return 1.0;
+            defaultCover = 1.0;
     }
+    if (defTeam && defTeam.microTerrain && defTeam.microTerrain.coverTable) {
+        let stateCover = defTeam.microTerrain.coverTable[defenderPlayer.state];
+        if (stateCover !== undefined) return stateCover;
+    }
+    return defaultCover;
 }
 
 function _computeHitRate(atkTeam, defTeam, defPlayer) {
@@ -95,7 +138,7 @@ function _computeHitRate(atkTeam, defTeam, defPlayer) {
     if (terrainDiff > 20) terrainMod = 1.15;
     else if (terrainDiff < -20) terrainMod = 0.85;
 
-    let coverMult = _getCoverMultiplier(defPlayer);
+    let coverMult = _getCoverMultiplier(defTeam, defPlayer);
 
     let hitRate = baseHit * aimCoeff / expCoeff * terrainMod * coverMult;
     return Math.max(0.05, Math.min(0.95, hitRate));

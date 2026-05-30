@@ -243,8 +243,16 @@ function renderCombatStatusHTML(state, tournament, t) {
 
     let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
     let enemyCards = enemyTeams.map(et => {
-        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}</div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+        let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain}</div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
     }).join('');
+
+    let myTerrainLabel = t.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${t.microTerrain.name}</span>` : '';
+    let macroLabel = '';
+    if (myCombat && myCombat.macroTerrain) {
+        let mName = myCombat.macroTerrain === 'urban' ? '城区' : (myCombat.macroTerrain === 'hills' ? '丘陵' : '开阔地');
+        macroLabel = `<span style="color:#80cbc4;">🗺️${mName}</span>`;
+    }
 
     return `
         <div class="combat-arena">
@@ -253,10 +261,10 @@ function renderCombatStatusHTML(state, tournament, t) {
                 <span style="color:#f44336;margin:0 6px;">⚔ VS ⚔</span>
                 <span style="color:#ff8a80;">${enemyNames || '???'}</span>
             </div>
-            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}</div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}${macroLabel ? ' | ' + macroLabel : ''}</div>
             <div class="combat-sides">
                 <div class="combat-side">
-                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}</div>
+                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel}</div>
                     ${allyCards}
                 </div>
                 <div class="combat-side">
@@ -291,7 +299,26 @@ function renderBRState(state, tournament) {
     ringEl.style.top = `${rY}px`;
 
     const mapContainer = document.getElementById('miniMap');
-    document.querySelectorAll('.map-team, .map-combat').forEach(el => el.remove());
+    document.querySelectorAll('.map-team, .map-combat, .map-zone').forEach(el => el.remove());
+
+    // 渲染地形层 Zone（矩形）
+    if (state.terrainZones) {
+        state.terrainZones.forEach(z => {
+            let el = document.createElement('div');
+            el.className = 'map-zone';
+            el.style.position = 'absolute';
+            el.style.left = `${z.x * MAP_RATIO}px`;
+            el.style.top = `${z.y * MAP_RATIO}px`;
+            el.style.width = `${z.width * MAP_RATIO}px`;
+            el.style.height = `${z.height * MAP_RATIO}px`;
+            el.style.borderRadius = '4px';
+            el.style.background = z.color;
+            el.style.opacity = '0.22';
+            el.style.pointerEvents = 'none';
+            el.style.zIndex = 1;
+            mapContainer.appendChild(el);
+        });
+    }
 
     state.combats.forEach(c => {
         let el = document.createElement('div');
@@ -368,10 +395,11 @@ function renderBRState(state, tournament) {
             return `${p.name}: ` + (p.isDown ? `♥️0 ${st}` : `♥️${p.hp.toFixed(0)} ${s} ${st}`);
         }).join(' | ');
         let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
+        let terrainText = (t.status === 'fight' && t.microTerrain) ? ` | 🌍${t.microTerrain.name}` : '';
         let mpIcon = tournament.teams[t.id].IsMatchPointEligible ? '🔥' : '';
         
         return `<div class="team-item ${statusClass}">
-            <strong>${mpIcon}${t.name}</strong> [${statusText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue} <br/> 队员: ${playersInfo}
+            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue} <br/> 队员: ${playersInfo}
         </div>`;
     }).join('');
     document.getElementById('teamList').innerHTML = teamListHtml;
@@ -402,14 +430,20 @@ function renderBRState(state, tournament) {
                     let et = state.teams[id];
                     return et ? (et.status === 'dead' ? `<span style="color:#777;text-decoration:line-through;">${et.name}</span>` : `<span style="color:#f44336;">${et.name}</span>`) : id;
                 }).join('、');
-                combatInfo = `<div style="margin:6px 0; padding:4px 8px; background:#331111; border-radius:4px; border-left:3px solid #f44336; font-size:13px;">⚔️ 交战对手: ${enemyNames}</div>`;
+                let macroLabel = '';
+                if (myCombat && myCombat.macroTerrain) {
+                    let mName = myCombat.macroTerrain === 'urban' ? '城区' : (myCombat.macroTerrain === 'hills' ? '丘陵' : '开阔地');
+                    macroLabel = `<span style="color:#80cbc4;">🗺️${mName}</span>`;
+                }
+                combatInfo = `<div style="margin:6px 0; padding:4px 8px; background:#331111; border-radius:4px; border-left:3px solid #f44336; font-size:13px;">⚔️ 交战对手: ${enemyNames}${macroLabel ? ' | ' + macroLabel : ''}</div>`;
 
                 // 敌方队员状态卡片
                 enemyIds.forEach(eid => {
                     let et = state.teams[eid];
                     if (!et || et.status === 'dead') return;
+                    let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
                     enemyCards += `<div style="margin-top:8px; padding:6px 10px; background:#2a1111; border-radius:6px; border:1px solid #441111;">
-                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}</div>
+                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain}</div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">` + et.players.map(p => {
                             let hpPct = Math.max(0, p.hp);
                             let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
