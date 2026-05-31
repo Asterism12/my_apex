@@ -75,43 +75,58 @@ function initMatch() {
         initLogs.push(`[赛事播报] 当前有 ${eligibleCount} 支赛点队伍！冠军可能会在本局诞生！`);
     }
 
-    // 生成地图地形层 Zone（Urban > Hills > Open）
+    // 生成地图地形层 Zone（不重叠、全覆盖、多种地形）
     let terrainZones = [];
-    // Urban: 3 个，矩形 400~600 x 300~400
-    for (let i = 0; i < 3; i++) {
-        terrainZones.push({
-            x: Math.floor(200 + Math.random() * 1200),
-            y: Math.floor(200 + Math.random() * 1200),
-            width: 400 + Math.floor(Math.random() * 201),
-            height: 300 + Math.floor(Math.random() * 101),
-            type: 'urban',
-            color: '#1a237e',
-            priority: 3
-        });
+    let mapX = 0, mapY = 0, mapW = 2000, mapH = 2000;
+    let cols = 3 + Math.floor(Math.random() * 3); // 3~5 列
+    let rows = 2 + Math.floor(Math.random() * 3); // 2~4 行
+    let baseW = mapW / cols;
+    let baseH = mapH / rows;
+
+    // 生成带随机偏移的列边界，保证不重叠且铺满
+    let colBounds = [mapX];
+    for (let i = 1; i < cols; i++) {
+        let offset = (Math.random() - 0.5) * (baseW * 0.5);
+        colBounds.push(Math.floor(mapX + i * baseW + offset));
     }
-    // Hills: 3 个，矩形 350~500 x 350~500
-    for (let i = 0; i < 3; i++) {
-        terrainZones.push({
-            x: Math.floor(200 + Math.random() * 1200),
-            y: Math.floor(200 + Math.random() * 1200),
-            width: 350 + Math.floor(Math.random() * 151),
-            height: 350 + Math.floor(Math.random() * 151),
-            type: 'hills',
-            color: '#1b5e20',
-            priority: 2
-        });
+    colBounds.push(mapX + mapW);
+
+    let rowBounds = [mapY];
+    for (let i = 1; i < rows; i++) {
+        let offset = (Math.random() - 0.5) * (baseH * 0.5);
+        rowBounds.push(Math.floor(mapY + i * baseH + offset));
     }
-    // Open: 4 个，矩形 500~700 x 400~500
-    for (let i = 0; i < 4; i++) {
-        terrainZones.push({
-            x: Math.floor(100 + Math.random() * 1200),
-            y: Math.floor(100 + Math.random() * 1200),
-            width: 500 + Math.floor(Math.random() * 201),
-            height: 400 + Math.floor(Math.random() * 101),
-            type: 'open',
-            color: '#e65100',
-            priority: 1
-        });
+    rowBounds.push(mapY + mapH);
+
+    // 准备地形池，确保各种地形（包括开阔地）都会出现
+    let totalCells = cols * rows;
+    let urbanCount = Math.max(2, Math.floor(totalCells * 0.25));
+    let hillsCount = Math.max(2, Math.floor(totalCells * 0.30));
+    let openCount = totalCells - urbanCount - hillsCount;
+    let terrainPool = [];
+    for (let i = 0; i < urbanCount; i++) terrainPool.push({ type: 'urban', color: '#1a237e', priority: 3 });
+    for (let i = 0; i < hillsCount; i++) terrainPool.push({ type: 'hills', color: '#1b5e20', priority: 2 });
+    for (let i = 0; i < openCount; i++) terrainPool.push({ type: 'open', color: '#e65100', priority: 1 });
+    terrainPool.sort(() => Math.random() - 0.5);
+
+    let poolIdx = 0;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            let t = terrainPool[poolIdx++];
+            let x = colBounds[c];
+            let y = rowBounds[r];
+            let w = colBounds[c + 1] - colBounds[c];
+            let h = rowBounds[r + 1] - rowBounds[r];
+            terrainZones.push({
+                x: x,
+                y: y,
+                width: w,
+                height: h,
+                type: t.type,
+                color: t.color,
+                priority: t.priority
+            });
+        }
     }
 
     return {
