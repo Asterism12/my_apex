@@ -197,8 +197,10 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
         return; // 未命中
     }
 
-    // 命中
-    let damage = 15;
+    // 命中：基础伤害 20，装备值影响火力倍率
+    let baseDmg = 20;
+    let equipMult = 0.3 + 0.7 * Math.min(attackerTeam.equipValue || 0, 100) / 100;
+    let damage = Math.floor(baseDmg * equipMult);
     let isHeadshot = false;
     let aimCoeff = attackerTeam._v2AimCoeff || 1.0;
     if (Math.random() < 0.1 * aimCoeff) {

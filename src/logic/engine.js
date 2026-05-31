@@ -43,17 +43,22 @@ function initTournament(payload) {
 
 function initMatch() {
     tournamentState.matchCount++;
+    // 生成 20 个资源点
+    let resourcePoints = _generateResourcePoints();
+
+    // 为每支队伍分配一个唯一的降落资源点
+    let shuffledRP = [...resourcePoints].sort(() => Math.random() - 0.5);
+
     let teamsData = {};
-    Object.values(tournamentState.teams).forEach(t => {
-        let spawnR = Math.random() * 900;
-        let spawnAngle = Math.random() * Math.PI * 2;
+    Object.values(tournamentState.teams).forEach((t, i) => {
+        let drop = shuffledRP[i] || { x: 1000, y: 1000 };
         teamsData[t.id] = {
             id: t.id,
             name: t.name,
-            x: Math.floor(1000 + spawnR * Math.cos(spawnAngle)),
-            y: Math.floor(1000 + spawnR * Math.sin(spawnAngle)),
+            x: drop.x,
+            y: drop.y,
             status: 'loot',
-            equipValue: 0,
+            equipValue: 10,
             aggro: t.IsMatchPointEligible ? 20 : (Math.floor(Math.random() * 50) + 50),
             aim: 50,
             experience: 50,
@@ -137,7 +142,8 @@ function initMatch() {
         combats: [],
         logs: initLogs,
         aliveTeamsCount: 20,
-        terrainZones: terrainZones
+        terrainZones: terrainZones,
+        resourcePoints: resourcePoints
     };
 }
 
@@ -175,17 +181,15 @@ function processBRTick(state) {
                 team.y -= (team.y - newState.ring.y) * 0.1;
                 team.status = 'move';
             } else {
-                let macroTerrain = _getMacroTerrainAt(team.x, team.y, newState.terrainZones);
-                let lootRate = (macroTerrain === 'urban') ? 1.5 : 1;
-                if (team.equipValue < 100) {
-                    team.equipValue = Math.min(100, team.equipValue + lootRate);
+                let searchResult = _processLoot(team, newState.teams, newState.resourcePoints, newState.terrainZones, newState.tick);
+                if (searchResult.looted) {
                     team.status = 'loot';
-                    addTeamComm(team, 'LOOT', newState.tick);
+                    if (searchResult.log) newState.logs.push(searchResult.log);
                 } else {
                     team.status = 'move';
+                    team.x += (Math.random() - 0.5) * 40;
+                    team.y += (Math.random() - 0.5) * 40;
                 }
-                team.x += (Math.random() - 0.5) * 40;
-                team.y += (Math.random() - 0.5) * 40;
             }
         }
 
@@ -255,7 +259,6 @@ function processBRTick(state) {
                 let t = newState.teams[tid];
                 if (t && t.status !== 'dead') {
                     t.status = 'loot';
-                    t.equipValue = Math.min(100, t.equipValue + 20);
                     _restoreTeamAfterCombat(t, newState.tick, newState.logs);
                 }
             });
@@ -277,7 +280,6 @@ function processBRTick(state) {
                     let t = newState.teams[tid];
                     if (t && t.status !== 'dead') {
                         t.status = 'loot';
-                        t.equipValue = Math.min(100, t.equipValue + 20);
                         _restoreTeamAfterCombat(t, newState.tick, newState.logs);
                     }
                 });
@@ -422,4 +424,107 @@ function addTeamComm(team, type, tick, targetName = "") {
 
     team.comms.push({ tick, speaker: speaker.name, text: line, type });
     team.lastCommTick = tick;
+}
+
+function _generateResourcePoints() {
+    let mapW = 2000, mapH = 2000;
+    let minDist = Math.hypot(mapW, mapH) * 0.15;
+    let points = [];
+    let cols = 4, rows = 5;
+    let cellW = mapW / cols;
+    let cellH = mapH / rows;
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            let cx = c * cellW + cellW / 2;
+            let cy = r * cellH + cellH / 2;
+            let offsetRange = Math.min(cellW, cellH) * 0.35;
+            let px = Math.floor(cx + (Math.random() - 0.5) * 2 * offsetRange);
+            let py = Math.floor(cy + (Math.random() - 0.5) * 2 * offsetRange);
+            px = Math.max(50, Math.min(mapW - 50, px));
+            py = Math.max(50, Math.min(mapH - 50, py));
+            points.push({ x: px, y: py });
+        }
+    }
+
+    points.sort(() => Math.random() - 0.5);
+    let tiers = [
+        { count: 3, min: 80, max: 100, color: '#ffd700', label: '高级' },
+        { count: 7, min: 50, max: 70, color: '#9c27b0', label: '中级' },
+        { count: 10, min: 20, max: 40, color: '#ffffff', label: '低级' }
+    ];
+    let idx = 0;
+    let resourcePoints = [];
+    for (let tier of tiers) {
+        for (let i = 0; i < tier.count; i++) {
+            let total = Math.floor(tier.min + Math.random() * (tier.max - tier.min + 1));
+            resourcePoints.push({
+                id: `RP_${idx}`,
+                x: points[idx].x,
+                y: points[idx].y,
+                totalValue: total,
+                remaining: total,
+                tier: tier.label,
+                color: tier.color,
+                radius: Math.hypot(mapW, mapH) * 0.05
+            });
+            idx++;
+        }
+    }
+    return resourcePoints;
+}
+
+function _processLoot(team, allTeams, resourcePoints, terrainZones, tick) {
+    let radius = Math.hypot(2000, 2000) * 0.05;
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (let rp of resourcePoints) {
+        let d = Math.hypot(team.x - rp.x, team.y - rp.y);
+        if (d < radius && d < nearestDist) {
+            nearest = rp;
+            nearestDist = d;
+        }
+    }
+
+    if (!nearest || nearest.remaining <= 0) {
+        return { looted: false };
+    }
+
+    let teamsHere = Object.values(allTeams).filter(t =>
+        t.id !== team.id && t.status !== 'dead' && Math.hypot(t.x - nearest.x, t.y - nearest.y) < radius
+    );
+    let isCompeting = teamsHere.length > 0;
+
+    let macroTerrain = _getMacroTerrainAt(team.x, team.y, terrainZones);
+    let baseLoot = isCompeting ? 3 : 5;
+    if (!isCompeting && macroTerrain === 'urban') {
+        baseLoot = 6;
+    }
+
+    let actualLoot = Math.min(baseLoot, nearest.remaining);
+    nearest.remaining -= actualLoot;
+    team.equipValue = Math.min(120, team.equipValue + actualLoot);
+
+    addTeamComm(team, 'LOOT', tick);
+
+    let log = null;
+    if (nearest.remaining <= 0) {
+        log = `[Tick ${tick}] 📦 资源点 [${nearest.x.toFixed(0)}, ${nearest.y.toFixed(0)}] (${nearest.tier}) 已被搜刮完毕！`;
+    }
+
+    return { looted: true, log };
+}
+
+function _findNearestResourcePoint(x, y, resourcePoints) {
+    let nearest = null;
+    let bestDist = Infinity;
+    for (let rp of resourcePoints) {
+        if (rp.remaining <= 0) continue;
+        let d = Math.hypot(x - rp.x, y - rp.y);
+        if (d < bestDist) {
+            bestDist = d;
+            nearest = rp;
+        }
+    }
+    return nearest;
 }

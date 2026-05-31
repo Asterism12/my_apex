@@ -369,6 +369,26 @@ function renderBRState(state, tournament) {
         });
     }
 
+    // 渲染资源点
+    if (state.resourcePoints) {
+        state.resourcePoints.forEach(rp => {
+            let el = document.createElement('div');
+            el.className = 'map-resource';
+            el.style.position = 'absolute';
+            el.style.left = `${rp.x * MAP_RATIO - 5}px`;
+            el.style.top = `${rp.y * MAP_RATIO - 5}px`;
+            el.style.width = '10px';
+            el.style.height = '10px';
+            el.style.backgroundColor = rp.color;
+            el.style.borderRadius = '50%';
+            el.style.border = rp.remaining <= 0 ? '2px solid #555' : '2px solid #fff';
+            el.style.opacity = rp.remaining <= 0 ? '0.3' : '0.9';
+            el.style.zIndex = 7;
+            el.title = `${rp.tier}点 | 剩余:${rp.remaining}/${rp.totalValue}`;
+            mapContainer.appendChild(el);
+        });
+    }
+
     state.combats.forEach(c => {
         let el = document.createElement('div');
         el.className = 'map-combat';
@@ -446,9 +466,16 @@ function renderBRState(state, tournament) {
         let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
         let terrainText = (t.status === 'fight' && t.microTerrain) ? ` | 🌍${t.microTerrain.name}` : '';
         let mpIcon = tournament.teams[t.id].IsMatchPointEligible ? '🔥' : '';
+        let nearRP = '';
+        if (state.resourcePoints && t.status !== 'dead') {
+            let closeRP = state.resourcePoints.find(rp => Math.hypot(t.x - rp.x, t.y - rp.y) < rp.radius);
+            if (closeRP) {
+                nearRP = ` | 📦${closeRP.tier}点(${closeRP.remaining})`;
+            }
+        }
         
         return `<div class="team-item ${statusClass}">
-            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue} <br/> 队员: ${playersInfo}
+            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue}${nearRP} <br/> 队员: ${playersInfo}
         </div>`;
     }).join('');
     document.getElementById('teamList').innerHTML = teamListHtml;
