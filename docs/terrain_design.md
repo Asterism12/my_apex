@@ -121,7 +121,7 @@ cover = defender.microTerrain.coverTable[defender.state] ?? defaultCover(state)
 ## 七、与现有系统的融合
 
 | 模块 | 联动方式 |
-|------|---------|
+|------|---------|~
 | **相遇检测** | 距离 < 阈值时，查询坐标宏观地形，触发微观地形分配 |
 | **装备系统** | Urban 区 `equipValue` 增长速度 +50% |
 | **缩圈** | 毒圈伤害不受地形影响，但跑毒中被拦截时，被迫在不利微观地形接战 |

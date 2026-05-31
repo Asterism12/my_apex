@@ -177,9 +177,13 @@ function processBRTick(state) {
             } else {
                 let macroTerrain = _getMacroTerrainAt(team.x, team.y, newState.terrainZones);
                 let lootRate = (macroTerrain === 'urban') ? 1.5 : 1;
-                if (team.equipValue < 100) team.equipValue = Math.min(100, team.equipValue + lootRate);
-                team.status = 'loot';
-                addTeamComm(team, 'LOOT', newState.tick);
+                if (team.equipValue < 100) {
+                    team.equipValue = Math.min(100, team.equipValue + lootRate);
+                    team.status = 'loot';
+                    addTeamComm(team, 'LOOT', newState.tick);
+                } else {
+                    team.status = 'move';
+                }
                 team.x += (Math.random() - 0.5) * 40;
                 team.y += (Math.random() - 0.5) * 40;
             }
