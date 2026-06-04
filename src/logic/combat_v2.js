@@ -54,6 +54,9 @@ function _initCombatV2(combat, allTeams) {
             team._v2AimCoeff = _getAttr(team, 'aim', 50) / 50;
             team._v2ExpBase = 1 + 0.005 * _getAttr(team, 'experience', 50);
         }
+        // 初始化进化甲相关字段
+        if (team.teamTotalDamage === undefined) team.teamTotalDamage = 0;
+        if (team._evoLevel === undefined) team._evoLevel = _getEvoLevel(team.teamTotalDamage).level;
 
         team.players.forEach(p => {
             // 缺少 v2 属性说明是后续劝架加入的队员，需要补初始化
@@ -68,6 +71,10 @@ function _initCombatV2(combat, allTeams) {
                 p.burstShotsLeft = 0;
                 p.revivingTargetId = null;
                 p._hitsThisTick = 0;
+            }
+            // 补初始化 shieldMax（兼容旧数据或劝架加入的队员）
+            if (p.shieldMax === undefined) {
+                p.shieldMax = _getEvoLevel(team.teamTotalDamage).shieldMax;
             }
         });
     });
@@ -252,6 +259,12 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
 
     if (logMsg) logs.push(logMsg);
 
+    // 进化甲：累加队伍总伤害并检查升级
+    if (damage > 0) {
+        attackerTeam.teamTotalDamage = (attackerTeam.teamTotalDamage || 0) + damage;
+        _checkEvoShieldUpgrade(attackerTeam, tick, logs);
+    }
+
     if (isHeadshot) {
         _tryAddComm(attackerTeam, 'HEADSHOT', tick, attackerPlayer.name, targetTeam.name);
     }
@@ -264,6 +277,36 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
 function _tryAddComm(team, type, tick, speakerName, targetName) {
     if (typeof addTeamComm === 'function') {
         addTeamComm(team, type, tick, targetName || '');
+    }
+}
+
+// ===== 进化甲系统（Evo Shield）=====
+const EVO_THRESHOLDS = [
+    { level: 1, color: '白色', shieldMax: 50, minDmg: 0 },
+    { level: 2, color: '蓝色', shieldMax: 75, minDmg: 350 },
+    { level: 3, color: '紫色', shieldMax: 100, minDmg: 1100 }
+];
+
+function _getEvoLevel(teamTotalDamage) {
+    let current = EVO_THRESHOLDS[0];
+    for (let t of EVO_THRESHOLDS) {
+        if (teamTotalDamage >= t.minDmg) current = t;
+    }
+    return current;
+}
+
+function _checkEvoShieldUpgrade(team, tick, logs) {
+    if (team.teamTotalDamage === undefined) team.teamTotalDamage = 0;
+    let prevLevel = team._evoLevel || 0;
+    let newEvo = _getEvoLevel(team.teamTotalDamage);
+    if (newEvo.level > prevLevel) {
+        team._evoLevel = newEvo.level;
+        team.players.forEach(p => {
+            if (!p.isDead) {
+                p.shieldMax = newEvo.shieldMax;
+            }
+        });
+        logs.push(`[Tick ${tick}] ⬆️ ${team.name} 累计伤害达到 ${team.teamTotalDamage}，进化甲升级为 ${newEvo.color} (${newEvo.shieldMax}甲)！`);
     }
 }
 
@@ -327,10 +370,10 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
             player.revivingTargetId = null;
         }
 
-        // 打电池完成 → 护盾回满
+        // 打电池完成 → 护盾回满至进化甲上限
         if (player.state === 'healing_shield') {
-            player.shield = 50;
-            logs.push(`[Tick ${tick}] 🔋 ${team.name}-${player.name} 护盾恢复完毕！`);
+            player.shield = player.shieldMax || 50;
+            logs.push(`[Tick ${tick}] 🔋 ${team.name}-${player.name} 护盾恢复完毕！(🛡️${player.shield})`);
         }
 
         // 打医疗包完成 → HP 回满

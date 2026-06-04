@@ -66,10 +66,12 @@ function initMatch() {
             comms: [],
             kills: 0,
             placement: 20,
+            teamTotalDamage: 0,
+            _evoLevel: 1,
             players: [
-                { id: `p1`, name: t.players[0], hp: 100, isDown: false, lastAtk: 0 },
-                { id: `p2`, name: t.players[1], hp: 100, isDown: false, lastAtk: 0 },
-                { id: `p3`, name: t.players[2], hp: 100, isDown: false, lastAtk: 0 }
+                { id: `p1`, name: t.players[0], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 },
+                { id: `p2`, name: t.players[1], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 },
+                { id: `p3`, name: t.players[2], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 }
             ]
         };
     });
@@ -375,12 +377,13 @@ function checkTeamAlive(team, state) {
 
 function _restoreTeamAfterCombat(team, tick, logs) {
     let revivedCount = 0;
+    let shieldMax = team.players[0] && team.players[0].shieldMax ? team.players[0].shieldMax : 50;
     team.players.forEach(p => {
-        if (p.isDown || p.isDead || p.hp < 100 || (p.shield !== undefined && p.shield < 50)) {
+        if (p.isDown || p.isDead || p.hp < 100 || (p.shield !== undefined && p.shield < (p.shieldMax || 50))) {
             if (p.isDown || p.isDead) revivedCount++;
         }
         p.hp = 100;
-        p.shield = 50;
+        p.shield = p.shieldMax || 50;
         p.magAmmo = 20;
         p.state = 'idle';
         p.stateTimer = 0;
@@ -395,8 +398,9 @@ function _restoreTeamAfterCombat(team, tick, logs) {
         p._lastTargetTeam = null;
     });
     team.microTerrain = null;
+    // teamTotalDamage 不清零，跨战斗持续累积
     if (revivedCount > 0) {
-        logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，${revivedCount} 名队员复活并恢复满状态！`);
+        logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，${revivedCount} 名队员复活并恢复满状态！(🛡️${shieldMax}甲)`);
     } else {
         logs.push(`[Tick ${tick}] ♻️ ${team.name} 战后休整，全员恢复满状态！`);
     }

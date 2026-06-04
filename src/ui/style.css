@@ -165,12 +165,28 @@ h1, h3 {
     border-radius: 3px;
     transition: width 0.2s ease;
 }
-.shield-bar-fill {
+/* 分段护甲条 */
+.shield-segments {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 3px;
+}
+.shield-seg {
+    flex: 1;
+    max-width: 25%;
+    height: 5px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+}
+.shield-seg-fill {
     height: 100%;
-    background: linear-gradient(90deg, #2196f3, #03a9f4);
-    border-radius: 3px;
+    border-radius: 2px;
     transition: width 0.2s ease;
 }
+.shield-seg-white .shield-seg-fill { background: #bdbdbd; }
+.shield-seg-blue .shield-seg-fill { background: #42a5f5; }
+.shield-seg-purple .shield-seg-fill { background: #ab47bc; }
 .combat-meta {
     display: flex;
     justify-content: space-between;

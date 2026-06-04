@@ -278,6 +278,37 @@ function _calcDmgPerShot(equipValue) {
 }
 
 /**
+ * 获取队伍进化甲颜色标签
+ */
+function _evoColorLabel(team) {
+    let sm = team.players[0] && team.players[0].shieldMax ? team.players[0].shieldMax : 50;
+    if (sm >= 100) return '<span style="color:#ab47bc;">🟣紫甲</span>';
+    if (sm >= 75) return '<span style="color:#42a5f5;">🔵蓝甲</span>';
+    return '<span style="color:#e0e0e0;">⚪白甲</span>';
+}
+
+/**
+ * 渲染分段护甲条（每格=25甲）
+ * 白甲2格 / 蓝甲3格 / 紫甲4格
+ */
+function _renderShieldBar(shieldVal, shieldMax) {
+    const CELL = 25;
+    const totalCells = Math.round(shieldMax / CELL);
+    let colorClass = 'shield-seg-white';
+    if (shieldMax >= 100) colorClass = 'shield-seg-purple';
+    else if (shieldMax >= 75) colorClass = 'shield-seg-blue';
+
+    let html = '<div class="shield-segments">';
+    for (let i = 0; i < totalCells; i++) {
+        let cellFill = Math.min(CELL, Math.max(0, shieldVal - i * CELL));
+        let pct = (cellFill / CELL) * 100;
+        html += `<div class="shield-seg ${colorClass}"><div class="shield-seg-fill" style="width:${pct}%;"></div></div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+/**
  * 渲染当前追踪队伍的图形化战斗状态面板
  */
 function renderCombatStatusHTML(state, tournament, t) {
@@ -287,7 +318,8 @@ function renderCombatStatusHTML(state, tournament, t) {
 
     const renderCard = (p, teamCtx, isEnemy) => {
         const hpPct = Math.max(0, p.hp);
-        const shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+        const shieldVal = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+        const shieldMax = p.shieldMax !== undefined ? p.shieldMax : 50;
         const mag = p.magAmmo !== undefined ? p.magAmmo : '-';
         const nameColor = isEnemy ? 'color:#ff8a80;' : 'color:#81c784;';
         const isDead = p.isDead || p.state === 'dead';
@@ -324,11 +356,11 @@ function renderCombatStatusHTML(state, tournament, t) {
             <div class="combat-player-name" style="${nameColor}">${p.name}${magHtml}</div>
             <div class="combat-bars">
                 <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%;"></div></div>
-                ${shieldPct > 0 ? `<div class="shield-bar-bg"><div class="shield-bar-fill" style="width:${Math.min(100, shieldPct*2)}%;"></div></div>` : '<div style="height:2px;"></div>'}
+                ${shieldVal > 0 || shieldMax > 0 ? _renderShieldBar(shieldVal, shieldMax) : ''}
             </div>
             <div class="combat-meta">
                 <span class="combat-state-badge" style="${stateBg}">${stateLabel}</span>
-                <span style="font-size:10px;color:#aaa;">♥${hpPct.toFixed(0)} ${shieldPct>0?`🛡${shieldPct}`:''}</span>
+                <span style="font-size:10px;color:#aaa;">♥${hpPct.toFixed(0)} ${shieldVal>0?`🛡${shieldVal}`:''}</span>
             </div>
             ${targetHtml}
         </div>`;
@@ -340,7 +372,7 @@ function renderCombatStatusHTML(state, tournament, t) {
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <strong>${t.name}</strong>
-                <span style="font-size:11px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}</span>
+                <span style="font-size:11px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0}</span>
             </div>
             <div style="font-size:12px; color:#aaa; margin-bottom:8px;">[${statusText}]</div>
             <div class="combat-sides" style="flex-direction:column; gap:6px;">
@@ -389,7 +421,7 @@ function renderCombatStatusHTML(state, tournament, t) {
                 <span style="color:#f44336;margin:0 6px;">⚔ VS ⚔</span>
                 <span style="color:#ff8a80;">${enemyNames || '???'}</span>
             </div>
-            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills}${macroLabel ? ' | ' + macroLabel : ''}</div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0}${macroLabel ? ' | ' + macroLabel : ''}</div>
             <div class="combat-sides">
                 <div class="combat-side">
                     <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel} <span style="color:#aaa;font-weight:normal;">| 装备:${t.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span></div>
@@ -557,7 +589,15 @@ function renderBRState(state, tournament, extraLogs = null) {
         const labels = { idle:'空闲', shooting:'🔥开火', reloading:'🔄换弹', healing_shield:'🔋打电', healing_hp:'💉打药', reviving:'🤝救援', 'in_cover':'🛡️缩掩体' };
         return labels[p.state] || p.state;
     };
-    const _shieldHtml = (p) => p.shield !== undefined ? `<span style="color:#2196f3;">🛡️${p.shield}</span>` : '';
+    const _shieldHtml = (p) => {
+        if (p.shield === undefined) return '';
+        let sm = p.shieldMax || 50;
+        let color = '#2196f3'; // 默认蓝色
+        if (sm === 50) color = '#e0e0e0'; // 白甲
+        else if (sm === 75) color = '#42a5f5'; // 蓝甲
+        else if (sm === 100) color = '#ab47bc'; // 紫甲
+        return `<span style="color:${color};">🛡️${p.shield}</span>`;
+    };
 
     const teamListHtml = Object.values(state.teams).map(t => {
         let statusClass = t.status === 'dead' ? 'team-dead' : (t.status === 'fight' ? 'team-fighting' : 'team-alive');
@@ -578,7 +618,7 @@ function renderBRState(state, tournament, extraLogs = null) {
         }
         
         return `<div class="team-item ${statusClass}">
-            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue}${nearRP} <br/> 队员: ${playersInfo}
+            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue} | ${_evoColorLabel(t)} | 累计伤害: ${t.teamTotalDamage||0}${nearRP} <br/> 队员: ${playersInfo}
         </div>`;
     }).join('');
     document.getElementById('teamList').innerHTML = teamListHtml;
@@ -624,10 +664,11 @@ function renderBRState(state, tournament, extraLogs = null) {
                     let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
                     let etDmg = _calcDmgPerShot(et.equipValue);
                     enemyCards += `<div style="margin-top:8px; padding:6px 10px; background:#2a1111; border-radius:6px; border:1px solid #441111;">
-                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 装备:${et.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>
+                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 装备:${et.equipValue} | ${_evoColorLabel(et)} | 总伤:${et.teamTotalDamage||0}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">` + et.players.map(p => {
                             let hpPct = Math.max(0, p.hp);
-                            let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                            let shieldVal = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                            let sMax = p.shieldMax !== undefined ? p.shieldMax : 50;
                             let stateLabel = '';
                             let stateColor = '#888';
                             if (p.isDead || p.state === 'dead') { stateLabel = '💀淘汰'; stateColor = '#777'; }
@@ -644,14 +685,12 @@ function renderBRState(state, tournament, extraLogs = null) {
                                 <div style="font-weight:bold; font-size:12px; margin-bottom:3px;">${p.name}</div>
                                 <div style="font-size:11px; margin-bottom:3px;">
                                     <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
-                                    ${shieldPct > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldPct}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
+                                    ${shieldVal > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldVal}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
                                 </div>
                                 <div style="width:100%; height:3px; background:#333; border-radius:2px; margin-bottom:3px; overflow:hidden;">
                                     <div style="width:${hpPct}%; height:100%; background:linear-gradient(90deg,#f44336,#e53935);"></div>
                                 </div>
-                                ${shieldPct > 0 ? `<div style="width:100%; height:2px; background:#333; border-radius:2px; margin-bottom:3px; overflow:hidden;">
-                                    <div style="width:${Math.min(100, shieldPct * 2)}%; height:100%; background:linear-gradient(90deg,#2196f3,#03a9f4);"></div>
-                                </div>` : ''}
+                                ${(shieldVal > 0 || sMax > 0) ? _renderShieldBar(shieldVal, sMax) : ''}
                                 <div style="font-size:11px; color:${stateColor}; font-weight:bold;">${stateLabel}</div>
                             </div>`;
                         }).join('') + `</div></div>`;
@@ -664,7 +703,8 @@ function renderBRState(state, tournament, extraLogs = null) {
         if (t.status !== 'dead') {
             playersCards = '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">' + t.players.map(p => {
                 let hpPct = Math.max(0, p.hp);
-                let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                let shieldVal = p.shield !== undefined ? Math.max(0, p.shield) : 0;
+                let sMax = p.shieldMax !== undefined ? p.shieldMax : 50;
                 let mag = p.magAmmo !== undefined ? p.magAmmo : '-';
                 let stateLabel = '';
                 let stateColor = '#888';
@@ -683,14 +723,12 @@ function renderBRState(state, tournament, extraLogs = null) {
                     <div style="font-weight:bold; font-size:13px; margin-bottom:4px;">${p.name}</div>
                     <div style="font-size:11px; margin-bottom:4px;">
                         <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
-                        ${shieldPct > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldPct}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
+                        ${shieldVal > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldVal}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
                     </div>
                     <div style="width:100%; height:4px; background:#333; border-radius:2px; margin-bottom:4px; overflow:hidden;">
                         <div style="width:${hpPct}%; height:100%; background:linear-gradient(90deg,#f44336,#e53935);"></div>
                     </div>
-                    ${shieldPct > 0 ? `<div style="width:100%; height:3px; background:#333; border-radius:2px; margin-bottom:4px; overflow:hidden;">
-                        <div style="width:${Math.min(100, shieldPct * 2)}%; height:100%; background:linear-gradient(90deg,#2196f3,#03a9f4);"></div>
-                    </div>` : ''}
+                    ${(shieldVal > 0 || sMax > 0) ? _renderShieldBar(shieldVal, sMax) : ''}
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">
                         <span style="color:${stateColor}; font-weight:bold;">${stateLabel}</span>
                         ${p.state === 'shooting' ? `<span style="color:#ffca28;">🔫${mag}</span>` : ''}
