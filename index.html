@@ -58,6 +58,8 @@
             <button id="fastForwardBtn" style="background:#e91e63;">⏩ 快速结束本局</button>
             <button id="autoSpectateBtn" style="background:#9c27b0;">🎯 快进至交火</button>
             <button id="nextMatchBtn" style="background:#ff9800;">开始下一局 (Match) >></button>
+            <button id="ttsToggleBtn" style="background:#4caf50;">🔊 语音播报开启</button>
+            <input type="checkbox" id="liveTtsToggle" checked style="display:none;">
         </div>
 
         <div class="battle-area" style="display:none;" id="battleArea">
@@ -89,9 +91,6 @@
                         <h3 style="margin: 0; color: #ff9800;">当前追踪队伍</h3>
                         <div>
                             <select id="followTeamSelect" style="background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:4px;"></select>
-                            <label style="margin-left: 10px; font-size: 14px; cursor: pointer;">
-                                <input type="checkbox" id="liveTtsToggle" checked> 开启实时语音
-                            </label>
                         </div>
                     </div>
                     <div id="liveTeamStatus" style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #444;">选定队伍后查看状态</div>

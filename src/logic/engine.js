@@ -148,7 +148,8 @@ function initMatch() {
 }
 
 function processBRTick(state) {
-    let newState = JSON.parse(JSON.stringify(state));
+    // let newState = JSON.parse(JSON.stringify(state));
+    let newState = state;
     newState.tick += 1;
     newState.logs = [];
 
@@ -255,6 +256,7 @@ function processBRTick(state) {
         let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t && t.status !== 'dead');
 
         if (fightingTeams.length <= 1) {
+            _distributeEliminatedEquip(combat, newState.teams, newState.tick, newState.logs);
             combat.teams.forEach(tid => {
                 let t = newState.teams[tid];
                 if (t && t.status !== 'dead') {
@@ -274,6 +276,8 @@ function processBRTick(state) {
                 let t = newState.teams[tid];
                 if (t && t.status !== 'dead') checkTeamAlive(t, newState);
             });
+
+            _distributeEliminatedEquip(combat, newState.teams, newState.tick, newState.logs);
 
             if (result.combatEnded) {
                 combat.teams.forEach(tid => {
@@ -398,6 +402,49 @@ function _restoreTeamAfterCombat(team, tick, logs) {
     }
 }
 
+function _distributeEliminatedEquip(combat, teams, tick, logs) {
+    let eliminated = combat.teams
+        .map(tid => teams[tid])
+        .filter(t => t && t.status === 'dead' && !t._equipLooted);
+    let survivors = combat.teams
+        .map(tid => teams[tid])
+        .filter(t => t && t.status !== 'dead');
+
+    if (eliminated.length === 0 || survivors.length === 0) return;
+
+    eliminated.forEach(elim => {
+        let loot = Math.floor((elim.equipValue || 0) * 0.7);
+        if (loot <= 0) {
+            elim._equipLooted = true;
+            return;
+        }
+
+        let portions = {};
+        survivors.forEach(s => portions[s.id] = 0);
+        for (let i = 0; i < loot; i++) {
+            let lucky = survivors[Math.floor(Math.random() * survivors.length)];
+            portions[lucky.id]++;
+        }
+
+        let receivers = [];
+        survivors.forEach(surv => {
+            let bonus = portions[surv.id] || 0;
+            if (bonus > 0) {
+                let oldVal = surv.equipValue || 0;
+                surv.equipValue = Math.min(100, oldVal + bonus);
+                receivers.push(`${surv.name}(+${bonus})`);
+            }
+        });
+
+        elim._equipLooted = true;
+        elim.equipValue = 0;
+
+        if (receivers.length > 0) {
+            logs.push(`[Tick ${tick}] 💰 ${elim.name} 被淘汰，装备被瓜分：${receivers.join('、')}`);
+        }
+    });
+}
+
 function _getMacroTerrainAt(x, y, zones) {
     if (!zones || zones.length === 0) return 'open';
     let matched = zones.filter(z => x >= z.x && x <= z.x + z.width && y >= z.y && y <= z.y + z.height);
@@ -423,6 +470,9 @@ function addTeamComm(team, type, tick, targetName = "") {
     line = line.replace('{敌方}', targetName || '敌人');
 
     team.comms.push({ tick, speaker: speaker.name, text: line, type });
+    if (team.comms.length > 50) {
+        team.comms = team.comms.slice(-50);
+    }
     team.lastCommTick = tick;
 }
 
@@ -503,7 +553,7 @@ function _processLoot(team, allTeams, resourcePoints, terrainZones, tick) {
 
     let actualLoot = Math.min(baseLoot, nearest.remaining);
     nearest.remaining -= actualLoot;
-    team.equipValue = Math.min(120, team.equipValue + actualLoot);
+    team.equipValue = Math.min(100, team.equipValue + actualLoot);
 
     addTeamComm(team, 'LOOT', tick);
 

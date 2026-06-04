@@ -13,6 +13,13 @@ let followedTeamId = null;
 let lastFollowedCommIndex = 0;
 let isTourBoardExpanded = false;
 
+let _pendingState = null;
+let _pendingTournament = null;
+let _pendingLogs = [];
+let _rAFId = null;
+let _lastRenderTick = -1;
+let _mapTeamEls = {};
+
 function setTourBoardExpanded(expanded) {
     isTourBoardExpanded = expanded;
     document.getElementById('tourBoardBody').style.display = isTourBoardExpanded ? 'block' : 'none';
@@ -83,6 +90,23 @@ document.getElementById('fastForwardBtn').addEventListener('click', () => {
     runBRSimulation();
 });
 
+function _updateTtsToggleBtn() {
+    const btn = document.getElementById('ttsToggleBtn');
+    const checked = document.getElementById('liveTtsToggle').checked;
+    if (checked) {
+        btn.textContent = '🔊 语音播报开启';
+        btn.style.background = '#4caf50';
+    } else {
+        btn.textContent = '🔇 语音播报关闭';
+        btn.style.background = '#757575';
+    }
+}
+document.getElementById('ttsToggleBtn').addEventListener('click', () => {
+    const cb = document.getElementById('liveTtsToggle');
+    cb.checked = !cb.checked;
+    _updateTtsToggleBtn();
+});
+
 document.getElementById('autoSpectateBtn').addEventListener('click', () => {
     if (autoSpectateMode) return;
     originalTickSpeed = parseInt(document.getElementById('tickSpeed').value) || 150;
@@ -90,6 +114,7 @@ document.getElementById('autoSpectateBtn').addEventListener('click', () => {
     currentTickSpeed = 5; // 2x faster than before
     autoSpectateMode = true;
     document.getElementById('liveTtsToggle').checked = false;
+    _updateTtsToggleBtn();
     document.getElementById('autoSpectateBtn').textContent = '⏩ 自动观战进行中...';
     document.getElementById('autoSpectateBtn').style.background = '#673ab7';
     runBRSimulation();
@@ -121,6 +146,20 @@ function setupMatch(state, tournament) {
     }
     
     lastFollowedCommIndex = 0;
+    _lastRenderTick = -1;
+    _mapTeamEls = {};
+    _pendingLogs = [];
+    _pendingState = null;
+    _pendingTournament = null;
+    if (_rAFId) {
+        cancelAnimationFrame(_rAFId);
+        _rAFId = null;
+    }
+    // 清理地图残留元素
+    const mapContainer = document.getElementById('miniMap');
+    Array.from(mapContainer.children).forEach(child => {
+        if (child.id !== 'miniMapRing') child.remove();
+    });
     renderBRState(state, tournament);
 }
 
@@ -168,26 +207,42 @@ document.getElementById('followTeamSelect').addEventListener('change', (e) => {
 
 function runBRSimulation() {
     if (simInterval) clearInterval(simInterval);
+    if (_rAFId) {
+        cancelAnimationFrame(_rAFId);
+        _rAFId = null;
+    }
+    _pendingState = null;
+    _pendingTournament = null;
+    _pendingLogs = [];
 
     simInterval = setInterval(() => {
         if (isPaused) return;
         const response = sendBRAction({ type: 'TICK' });
-        
         if (response.success) {
-            renderBRState(response.state, response.tournament);
+            _pendingState = response.state;
+            _pendingTournament = response.tournament;
+            if (response.state.logs && response.state.logs.length > 0) {
+                _pendingLogs.push(...response.state.logs);
+            }
+            _scheduleRender();
+
             if (response.state.status !== 'running') {
                 clearInterval(simInterval);
+                simInterval = null;
+                // 强制最终渲染并 flush 剩余日志
+                renderBRState(response.state, response.tournament, _pendingLogs);
+                _pendingLogs = [];
+                _lastRenderTick = response.state.tick;
                 document.getElementById('matchControls').style.display = 'block';
                 document.getElementById('pauseBtn').style.display = 'none';
                 document.getElementById('fastForwardBtn').style.display = 'none';
                 document.getElementById('autoSpectateBtn').style.display = 'none';
                 isPaused = false;
                 autoSpectateMode = false;
-                renderTournamentBoard(response.tournament); // 最终更新计分板
+                renderTournamentBoard(response.tournament);
                 setTourBoardExpanded(true);
                 if(response.tournament.status === 'FINISHED') {
                     document.getElementById('nextMatchBtn').style.display = 'none';
-                    // tournament over
                 } else {
                     document.getElementById('nextMatchBtn').style.display = 'inline-block';
                 }
@@ -196,8 +251,30 @@ function runBRSimulation() {
         } else {
             console.error("Tick failed:", response.error);
             clearInterval(simInterval);
+            simInterval = null;
         }
     }, currentTickSpeed);
+}
+
+function _scheduleRender() {
+    if (_rAFId) return;
+    _rAFId = requestAnimationFrame(() => {
+        _rAFId = null;
+        if (_pendingState && _pendingState.tick !== _lastRenderTick) {
+            renderBRState(_pendingState, _pendingTournament, _pendingLogs);
+            _lastRenderTick = _pendingState.tick;
+            _pendingLogs = [];
+        }
+    });
+}
+
+/**
+ * 根据装备值计算理论单次伤害（对应 combat_v2 中 _fireBullet 公式）
+ */
+function _calcDmgPerShot(equipValue) {
+    let ev = Math.min(equipValue || 0, 100);
+    let mult = 0.3 + 0.7 * ev / 100;
+    return Math.floor(20 * mult);
 }
 
 /**
@@ -285,6 +362,7 @@ function renderCombatStatusHTML(state, tournament, t) {
     };
     let myTerrainVal = _calcTerrainValue(t);
 
+    let myDmg = _calcDmgPerShot(t.equipValue);
     let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
     let enemyCards = enemyTeams.map(et => {
         let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
@@ -292,7 +370,8 @@ function renderCombatStatusHTML(state, tournament, t) {
         let diff = myTerrainVal - etTerrainVal;
         let diffColor = diff > 0 ? '#4caf50' : (diff < 0 ? '#f44336' : '#aaa');
         let diffText = diff > 0 ? `+${diff}` : `${diff}`;
-        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span></span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+        let etDmg = _calcDmgPerShot(et.equipValue);
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span> | 装备:${et.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
     }).join('');
 
     let myTerrainLabel = t.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${t.microTerrain.name}</span>` : '';
@@ -310,10 +389,10 @@ function renderCombatStatusHTML(state, tournament, t) {
                 <span style="color:#f44336;margin:0 6px;">⚔ VS ⚔</span>
                 <span style="color:#ff8a80;">${enemyNames || '???'}</span>
             </div>
-            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue}${macroLabel ? ' | ' + macroLabel : ''}</div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills}${macroLabel ? ' | ' + macroLabel : ''}</div>
             <div class="combat-sides">
                 <div class="combat-side">
-                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel}</div>
+                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel} <span style="color:#aaa;font-weight:normal;">| 装备:${t.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span></div>
                     ${allyCards}
                 </div>
                 <div class="combat-side">
@@ -325,7 +404,7 @@ function renderCombatStatusHTML(state, tournament, t) {
     `;
 }
 
-function renderBRState(state, tournament) {
+function renderBRState(state, tournament, extraLogs = null) {
     let aliveCount = state.aliveTeamsCount;
     document.getElementById('mapStatus').innerHTML = `
         <div style="display:flex; justify-content: space-between; margin-bottom: 10px;">
@@ -348,7 +427,7 @@ function renderBRState(state, tournament) {
     ringEl.style.top = `${rY}px`;
 
     const mapContainer = document.getElementById('miniMap');
-    document.querySelectorAll('.map-team, .map-combat, .map-zone').forEach(el => el.remove());
+    document.querySelectorAll('.map-combat, .map-resource, .map-zone').forEach(el => el.remove());
 
     // 渲染地形层 Zone（矩形）
     if (state.terrainZones) {
@@ -402,49 +481,73 @@ function renderBRState(state, tournament) {
     });
 
     Object.values(state.teams).forEach(t => {
-        if (t.status === 'dead') return;
-        let el = document.createElement('div');
-        el.className = 'map-team';
-        
-        let color = '#4caf50'; // loot/idle
-        if (t.status === 'fight') color = '#f44336'; // 交火中
-        else if (t.status === 'move') color = '#ff9800'; // 跑毒中
+        if (t.status === 'dead') {
+            if (_mapTeamEls[t.id]) {
+                _mapTeamEls[t.id].el.remove();
+                delete _mapTeamEls[t.id];
+            }
+            return;
+        }
 
-        el.style.position = 'absolute';
-        el.style.width = '12px';
-        el.style.height = '12px';
-        el.style.backgroundColor = color;
-        el.style.borderRadius = '50%';
-        el.style.left = `${t.x * MAP_RATIO - 6}px`;
-        el.style.top = `${t.y * MAP_RATIO - 6}px`;
-        el.style.zIndex = 10;
-        
+        let entry = _mapTeamEls[t.id];
+        let color = '#4caf50';
+        if (t.status === 'fight') color = '#f44336';
+        else if (t.status === 'move') color = '#ff9800';
+
+        if (!entry) {
+            let el = document.createElement('div');
+            el.className = 'map-team';
+            el.style.position = 'absolute';
+            el.style.width = '12px';
+            el.style.height = '12px';
+            el.style.borderRadius = '50%';
+            el.style.zIndex = 10;
+
+            if (tournament.teams[t.id].IsMatchPointEligible) {
+                el.style.boxShadow = '0 0 8px 2px #ffeb3b';
+                el.style.border = '1px solid #fff';
+            } else {
+                el.style.border = '1px solid #222';
+            }
+
+            let label = document.createElement('span');
+            label.textContent = t.name.replace('Team ', 'T');
+            label.style.position = 'absolute';
+            label.style.color = '#fff';
+            label.style.fontSize = '11px';
+            label.style.left = '16px';
+            label.style.top = '-3px';
+            label.style.fontWeight = 'bold';
+            label.style.textShadow = '1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000';
+            label.style.whiteSpace = 'nowrap';
+            el.appendChild(label);
+
+            mapContainer.appendChild(el);
+            entry = { el, label };
+            _mapTeamEls[t.id] = entry;
+        }
+
+        entry.el.style.backgroundColor = color;
+        entry.el.style.left = `${t.x * MAP_RATIO - 6}px`;
+        entry.el.style.top = `${t.y * MAP_RATIO - 6}px`;
+
         if (tournament.teams[t.id].IsMatchPointEligible) {
-            el.style.boxShadow = '0 0 8px 2px #ffeb3b';
-            el.style.border = '1px solid #fff';
+            entry.el.style.boxShadow = '0 0 8px 2px #ffeb3b';
+            entry.el.style.border = '1px solid #fff';
         } else {
-            el.style.border = '1px solid #222';
-        }
-        
-        let label = document.createElement('span');
-        label.textContent = t.name.replace('Team ', 'T');
-        label.style.position = 'absolute';
-        label.style.color = '#fff';
-        label.style.fontSize = '11px';
-        label.style.left = '16px';
-        label.style.top = '-3px';
-        label.style.fontWeight = 'bold';
-        label.style.textShadow = '1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000';
-        label.style.whiteSpace = 'nowrap';
-        
-        if (t.id === followedTeamId) {
-            el.style.transform = 'scale(1.5)';
-            el.style.zIndex = 100;
-            label.style.color = '#00e5ff';
+            entry.el.style.boxShadow = 'none';
+            entry.el.style.border = '1px solid #222';
         }
 
-        el.appendChild(label);
-        mapContainer.appendChild(el);
+        if (t.id === followedTeamId) {
+            entry.el.style.transform = 'scale(1.5)';
+            entry.el.style.zIndex = 100;
+            entry.label.style.color = '#00e5ff';
+        } else {
+            entry.el.style.transform = 'scale(1)';
+            entry.el.style.zIndex = 10;
+            entry.label.style.color = '#fff';
+        }
     });
     // ==== 地图渲染结束 ====
 
@@ -488,6 +591,7 @@ function renderBRState(state, tournament) {
             autoSpectateMode = false;
             currentTickSpeed = originalTickSpeed;
             document.getElementById('liveTtsToggle').checked = originalTtsChecked;
+            _updateTtsToggleBtn();
             document.getElementById('autoSpectateBtn').textContent = '🎯 快进至交火';
             document.getElementById('autoSpectateBtn').style.background = '#9c27b0';
             runBRSimulation();
@@ -518,8 +622,9 @@ function renderBRState(state, tournament) {
                     let et = state.teams[eid];
                     if (!et || et.status === 'dead') return;
                     let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
+                    let etDmg = _calcDmgPerShot(et.equipValue);
                     enemyCards += `<div style="margin-top:8px; padding:6px 10px; background:#2a1111; border-radius:6px; border:1px solid #441111;">
-                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain}</div>
+                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 装备:${et.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">` + et.players.map(p => {
                             let hpPct = Math.max(0, p.hp);
                             let shieldPct = p.shield !== undefined ? Math.max(0, p.shield) : 0;
@@ -601,6 +706,7 @@ function renderBRState(state, tournament) {
         const logsContainer = document.getElementById('liveTeamLogs');
         const liveTtsEnabled = document.getElementById('liveTtsToggle').checked;
 
+        if (lastFollowedCommIndex > t.comms.length) lastFollowedCommIndex = 0;
         if (t.comms && t.comms.length > lastFollowedCommIndex) {
             if (ttsPlayer.comms.length === 0 || ttsPlayer.comms !== t.comms) {
                ttsPlayer.playerVoices = {};
@@ -637,9 +743,10 @@ function renderBRState(state, tournament) {
         }
     }
 
-    if (state.logs && state.logs.length > 0) {
+    const logsToRender = extraLogs || state.logs || [];
+    if (logsToRender.length > 0) {
         const logsDiv = document.getElementById('logs');
-        state.logs.forEach(log => {
+        logsToRender.forEach(log => {
             const p = document.createElement('p');
             p.textContent = log;
             if (log.includes('淘汰') || log.includes('终局') || log.includes('结束')) {
