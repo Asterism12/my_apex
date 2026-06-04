@@ -376,9 +376,17 @@ function renderCombatStatusHTML(state, tournament, t) {
         else if (p.state === 'in_cover') { stateLabel = '掩体'; stateBg = 'background:#3e2723;color:#efebe9;'; }
         else { stateLabel = '空闲'; stateBg = 'background:#1b5e20;color:#e8f5e9;'; }
 
+        // 枪线指示器：开火状态时显示醒目指向标志
+        let gunLineIndicator = '';
+        if (p.state === 'shooting' && p._lastTargetName) {
+            const dirArrow = isEnemy ? '◀' : '▶';
+            const lineColor = isEnemy ? '#f44336' : '#ffca28';
+            gunLineIndicator = `<span class="gun-shot-indicator" style="color:${lineColor};margin-left:4px;animation:gunPulse 0.5s ease-in-out infinite alternate;">${dirArrow}🎯</span>`;
+        }
+
         let targetHtml = '';
         if (p.state === 'shooting' && p._lastTargetName) {
-            targetHtml = `<div style="font-size:10px;color:#ffca28;margin-top:2px;">➤ 攻击 ${p._lastTargetName}</div>`;
+            targetHtml = `<div style="font-size:10px;color:#ffca28;margin-top:2px;">➤ 攻击 ${p._lastTargetName} (<span style="color:#ff8a80;">${p._lastTargetTeam||''}</span>)</div>`;
         } else if (p.state === 'reviving' && p.revivingTargetId) {
             const targetPlayer = teamCtx.players.find(tp => tp.id === p.revivingTargetId);
             const targetName = targetPlayer ? targetPlayer.name : p.revivingTargetId;
@@ -402,7 +410,7 @@ function renderCombatStatusHTML(state, tournament, t) {
 
         return `
         <div class="combat-player-card ${isDead?'dead':''}" style="${isDown?'border-color:#b71c1c;':''}">
-            <div class="combat-player-name" style="${nameColor}">${p.name}${magHtml}</div>
+            <div class="combat-player-name" style="${nameColor}">${p.name}${magHtml}${gunLineIndicator}</div>
             ${wpnHtml}
             <div class="combat-bars">
                 <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%;"></div></div>
@@ -447,6 +455,8 @@ function renderCombatStatusHTML(state, tournament, t) {
 
     let myDmg = _calcDmgPerShot(t);
     let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
+
+    // 敌方卡片（含完整资源信息）
     let enemyCards = enemyTeams.map(et => {
         let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
         let etTerrainVal = _calcTerrainValue(et);
@@ -454,7 +464,8 @@ function renderCombatStatusHTML(state, tournament, t) {
         let diffColor = diff > 0 ? '#4caf50' : (diff < 0 ? '#f44336' : '#aaa');
         let diffText = diff > 0 ? `+${diff}` : `${diff}`;
         let etDmg = _calcDmgPerShot(et);
-        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span></span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+        let etSupp = _suppliesLabel(et);
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span></span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span><br><span style="font-size:10px;color:#aaa;">${_evoColorLabel(et)} | ${etSupp} | 总伤:${et.teamTotalDamage||0} | 击杀:${et.kills||0}</span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
     }).join('');
 
     let myTerrainLabel = t.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${t.microTerrain.name}</span>` : '';
@@ -467,6 +478,15 @@ function renderCombatStatusHTML(state, tournament, t) {
 
     let mySuppLabel = _suppliesLabel(t);
 
+    // 我方标题行（格式与敌方对齐：队名 | 地形值 | 单发伤害 / 护甲 | 补给 | 总伤 | 击杀）
+    let myTitleLine = `<span style="color:#4caf50;font-weight:bold;">${t.name}</span>${myTerrainLabel}`;
+    myTitleLine += ` <span style="color:#aaa;font-weight:normal;">| 地形值:${myTerrainVal}</span>`;
+    myTitleLine += ` <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span>`;
+    myTitleLine += `<br><span style="font-size:10px;color:#aaa;">${_evoColorLabel(t)} | ${mySuppLabel} | 总伤:${t.teamTotalDamage||0} | 击杀:${t.kills||0}</span>`;
+
+    // ===== 构建枪线 SVG 覆盖层 =====
+    let gunLinesSvg = _buildGunLinesSVG(t, enemyTeams);
+
     return `
         <div class="combat-arena">
             <div class="combat-vs-header">
@@ -475,18 +495,102 @@ function renderCombatStatusHTML(state, tournament, t) {
                 <span style="color:#ff8a80;">${enemyNames || '???'}</span>
             </div>
             <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0} | ${mySuppLabel}${macroLabel ? ' | ' + macroLabel : ''}</div>
-            <div class="combat-sides">
-                <div class="combat-side">
-                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel} <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span></div>
-                    ${allyCards}
+            <div class="combat-battlefield-wrapper">
+                <div class="combat-sides">
+                    <div class="combat-side">
+                        <div class="combat-side-title" style="text-align:center;margin-bottom:4px;">${myTitleLine}</div>
+                        ${allyCards}
+                    </div>
+                    <div class="combat-side">
+                        <div class="combat-side-title" style="color:#f44336;">敌方 ${enemyNames || '???'}</div>
+                        ${enemyCards || '<div style="color:#777;font-size:12px;text-align:center;">无情报</div>'}
+                    </div>
                 </div>
-                <div class="combat-side">
-                    <div class="combat-side-title" style="color:#f44336;">敌方 ${enemyNames || '???'}</div>
-                    ${enemyCards || '<div style="color:#777;font-size:12px;text-align:center;">无情报</div>'}
-                </div>
+                ${gunLinesSvg}
             </div>
         </div>
     `;
+}
+
+/**
+ * 构建枪线 SVG 覆盖层
+ * 在战斗对阵面板上绘制从射手到目标的枪线
+ */
+function _buildGunLinesSVG(allyTeam, enemyTeams) {
+    let allShooters = [];
+
+    // 收集我方射击信息
+    allyTeam.players.forEach((p, idx) => {
+        if (p.state === 'shooting' && p._lastTargetName && !p.isDead && !p.isDown) {
+            allShooters.push({ fromSide: 'left', fromIdx: idx, fromName: p.name, targetName: p._lastTargetName, targetTeam: p._lastTargetTeam, color: '#ffca28' });
+        }
+    });
+
+    // 收集敌方射击信息
+    enemyTeams.forEach((et, etIdx) => {
+        et.players.forEach((p, pIdx) => {
+            if (p.state === 'shooting' && p._lastTargetName && !p.isDead && !p.isDown) {
+                allShooters.push({ fromSide: 'right', fromIdx: pIdx, fromName: p.name, targetName: p._lastTargetName, targetTeam: p._lastTargetTeam, color: '#f44336', fromTeamIdx: etIdx });
+            }
+        });
+    });
+
+    if (allShooters.length === 0) {
+        return '';
+    }
+
+    // 估算卡片位置：每张卡片约 90px 高，6px gap，标题约 25px
+    const CARD_EST_H = 90;
+    const CARD_GAP = 6;
+    const TITLE_OFFSET = 25;
+
+    // 构建目标查找：name → { side, idx }
+    let targetMap = {};
+    allyTeam.players.forEach((p, idx) => {
+        if (!p.isDead) targetMap[p.name] = { side: 'left', idx };
+    });
+    enemyTeams.forEach((et, etIdx) => {
+        et.players.forEach((p, pIdx) => {
+            if (!p.isDead) targetMap[p.name] = { side: 'right', idx: pIdx, teamIdx: etIdx };
+        });
+    });
+
+    let lines = allShooters.map((s, i) => {
+        let target = targetMap[s.targetName];
+        if (!target) return '';
+
+        let fromY = TITLE_OFFSET + s.fromIdx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
+        let toY = TITLE_OFFSET + target.idx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
+
+        let x1, x2;
+        if (s.fromSide === 'left') {
+            x1 = 5; x2 = 95;
+        } else {
+            x1 = 95; x2 = 5;
+        }
+
+        let dashLen = 4 + (i % 3);
+        return `<line x1="${x1}" y1="${fromY}" x2="${x2}" y2="${toY}" 
+            stroke="${s.color}" stroke-width="2" stroke-dasharray="${dashLen},${dashLen}" 
+            opacity="0.85" class="gun-line gun-line-${i}">
+            <animate attributeName="stroke-dashoffset" from="0" to="-${dashLen * 4}" dur="0.6s" repeatCount="indefinite"/>
+            <title>${s.fromName} ➤ ${s.targetName}</title>
+        </line>`;
+    }).filter(l => l).join('\n');
+
+    let totalPlayers = Math.max(allyTeam.players.filter(p => !p.isDead).length,
+        enemyTeams.reduce((sum, et) => sum + et.players.filter(p => !p.isDead).length, 0));
+    let svgHeight = TITLE_OFFSET + totalPlayers * (CARD_EST_H + CARD_GAP);
+
+    return `<svg class="battlefield-gunlines-overlay" viewBox="0 0 100 ${svgHeight}" preserveAspectRatio="none">
+        <defs>
+            <filter id="gunGlow">
+                <feGaussianBlur stdDeviation="0.8" result="blur"/>
+                <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+        </defs>
+        ${lines}
+    </svg>`;
 }
 
 function renderBRState(state, tournament, extraLogs = null) {
