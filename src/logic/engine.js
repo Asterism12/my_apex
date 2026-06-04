@@ -52,13 +52,21 @@ function initMatch() {
     let teamsData = {};
     Object.values(tournamentState.teams).forEach((t, i) => {
         let drop = shuffledRP[i] || { x: 1000, y: 1000 };
+        // 每个队员各自随机 T3 武器
+        let players = [
+            { id: `p1`, name: t.players[0], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50,
+              closeWeapon: getRandomT3Weapon('close'), longWeapon: getRandomT3Weapon('long') },
+            { id: `p2`, name: t.players[1], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50,
+              closeWeapon: getRandomT3Weapon('close'), longWeapon: getRandomT3Weapon('long') },
+            { id: `p3`, name: t.players[2], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50,
+              closeWeapon: getRandomT3Weapon('close'), longWeapon: getRandomT3Weapon('long') }
+        ];
         teamsData[t.id] = {
             id: t.id,
             name: t.name,
             x: drop.x,
             y: drop.y,
             status: 'loot',
-            equipValue: 10,
             aggro: t.IsMatchPointEligible ? 20 : (Math.floor(Math.random() * 50) + 50),
             aim: 50,
             experience: 50,
@@ -68,11 +76,9 @@ function initMatch() {
             placement: 20,
             teamTotalDamage: 0,
             _evoLevel: 1,
-            players: [
-                { id: `p1`, name: t.players[0], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 },
-                { id: `p2`, name: t.players[1], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 },
-                { id: `p3`, name: t.players[2], hp: 100, isDown: false, lastAtk: 0, shield: 50, shieldMax: 50 }
-            ]
+            _lastDamagerTeamId: null,
+            supplies: { batteries: 2, medkits: 2 },
+            players: players
         };
     });
 
@@ -414,37 +420,66 @@ function _distributeEliminatedEquip(combat, teams, tick, logs) {
         .map(tid => teams[tid])
         .filter(t => t && t.status !== 'dead');
 
-    if (eliminated.length === 0 || survivors.length === 0) return;
+    if (eliminated.length === 0) return;
 
     eliminated.forEach(elim => {
-        let loot = Math.floor((elim.equipValue || 0) * 0.7);
-        if (loot <= 0) {
+        // 找出最后一个对其造成伤害的队伍
+        let looterTeam = null;
+        if (elim._lastDamagerTeamId && survivors.find(s => s.id === elim._lastDamagerTeamId)) {
+            looterTeam = survivors.find(s => s.id === elim._lastDamagerTeamId);
+        } else if (survivors.length > 0) {
+            // 没有记录伤害来源时，随机分配给一个幸存者
+            looterTeam = survivors[Math.floor(Math.random() * survivors.length)];
+        }
+
+        if (!looterTeam) {
             elim._equipLooted = true;
             return;
         }
 
-        let portions = {};
-        survivors.forEach(s => portions[s.id] = 0);
-        for (let i = 0; i < loot; i++) {
-            let lucky = survivors[Math.floor(Math.random() * survivors.length)];
-            portions[lucky.id]++;
+        let batteryGain = elim.supplies ? (elim.supplies.batteries || 0) : 0;
+        let medkitGain = elim.supplies ? (elim.supplies.medkits || 0) : 0;
+        let supplyParts = [];
+        if (batteryGain > 0) {
+            looterTeam.supplies.batteries = (looterTeam.supplies.batteries || 0) + batteryGain;
+            supplyParts.push(`电池×${batteryGain}`);
+        }
+        if (medkitGain > 0) {
+            looterTeam.supplies.medkits = (looterTeam.supplies.medkits || 0) + medkitGain;
+            supplyParts.push(`医疗包×${medkitGain}`);
         }
 
-        let receivers = [];
-        survivors.forEach(surv => {
-            let bonus = portions[surv.id] || 0;
-            if (bonus > 0) {
-                let oldVal = surv.equipValue || 0;
-                surv.equipValue = Math.min(100, oldVal + bonus);
-                receivers.push(`${surv.name}(+${bonus})`);
-            }
+        // 武器择优替换
+        let weaponUpgrades = [];
+        looterTeam.players.forEach(myP => {
+            if (myP.isDead) return;
+            elim.players.forEach(deadP => {
+                if (deadP.closeWeapon && (!myP.closeWeapon || deadP.closeWeapon.tier < myP.closeWeapon.tier)) {
+                    let oldLabel = myP.closeWeapon ? weaponShortLabel(myP.closeWeapon) : '无';
+                    myP.closeWeapon = { ...deadP.closeWeapon };
+                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(deadP.closeWeapon)}`);
+                }
+                if (deadP.longWeapon && (!myP.longWeapon || deadP.longWeapon.tier < myP.longWeapon.tier)) {
+                    let oldLabel = myP.longWeapon ? weaponShortLabel(myP.longWeapon) : '无';
+                    myP.longWeapon = { ...deadP.longWeapon };
+                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(deadP.longWeapon)}(远)`);
+                }
+            });
         });
 
+        // 清零败方
+        if (elim.supplies) {
+            elim.supplies.batteries = 0;
+            elim.supplies.medkits = 0;
+        }
         elim._equipLooted = true;
-        elim.equipValue = 0;
 
-        if (receivers.length > 0) {
-            logs.push(`[Tick ${tick}] 💰 ${elim.name} 被淘汰，装备被瓜分：${receivers.join('、')}`);
+        let parts = [];
+        if (supplyParts.length > 0) parts.push(supplyParts.join('、'));
+        if (weaponUpgrades.length > 0) parts.push('武器升级: ' + weaponUpgrades.join(', '));
+
+        if (parts.length > 0) {
+            logs.push(`[Tick ${tick}] 💰 ${looterTeam.name} 舔了 ${elim.name} 的包，获得 ${parts.join(' | ')}`);
         }
     });
 }
@@ -503,9 +538,9 @@ function _generateResourcePoints() {
 
     points.sort(() => Math.random() - 0.5);
     let tiers = [
-        { count: 3, min: 80, max: 100, color: '#ffd700', label: '高级' },
-        { count: 7, min: 50, max: 70, color: '#9c27b0', label: '中级' },
-        { count: 10, min: 20, max: 40, color: '#ffffff', label: '低级' }
+        { count: 3, min: 12, max: 18, color: '#ffd700', label: '高级' },
+        { count: 7, min: 7, max: 11, color: '#9c27b0', label: '中级' },
+        { count: 10, min: 3, max: 6, color: '#ffffff', label: '低级' }
     ];
     let idx = 0;
     let resourcePoints = [];
@@ -516,8 +551,7 @@ function _generateResourcePoints() {
                 id: `RP_${idx}`,
                 x: points[idx].x,
                 y: points[idx].y,
-                totalValue: total,
-                remaining: total,
+                resourceTokens: total,
                 tier: tier.label,
                 color: tier.color,
                 radius: Math.hypot(mapW, mapH) * 0.05
@@ -540,7 +574,7 @@ function _processLoot(team, allTeams, resourcePoints, terrainZones, tick) {
         }
     }
 
-    if (!nearest || nearest.remaining <= 0) {
+    if (!nearest || nearest.resourceTokens <= 0) {
         return { looted: false };
     }
 
@@ -550,30 +584,63 @@ function _processLoot(team, allTeams, resourcePoints, terrainZones, tick) {
     let isCompeting = teamsHere.length > 0;
 
     let macroTerrain = _getMacroTerrainAt(team.x, team.y, terrainZones);
-    let baseLoot = isCompeting ? 3 : 5;
-    if (!isCompeting && macroTerrain === 'urban') {
-        baseLoot = 6;
+    // 城区搜索频率 +20%：每 0.8 轮一次搜索，这里简化处理为偶尔双倍消耗
+    let tokensToConsume = 1;
+    if (!isCompeting && macroTerrain === 'urban' && Math.random() < 0.2) {
+        tokensToConsume = 2;
     }
 
-    let actualLoot = Math.min(baseLoot, nearest.remaining);
-    nearest.remaining -= actualLoot;
-    team.equipValue = Math.min(100, team.equipValue + actualLoot);
+    let actualTokens = Math.min(tokensToConsume, nearest.resourceTokens);
+    nearest.resourceTokens -= actualTokens;
+
+    let logs = [];
+    for (let t = 0; t < actualTokens; t++) {
+        let loot = rollLoot(nearest.tier);
+
+        if (loot.type === 'battery') {
+            team.supplies.batteries = (team.supplies.batteries || 0) + 1;
+            logs.push(`[Tick ${tick}] 🔋 ${team.name} 搜到 1 个电池 (库存: ${team.supplies.batteries})`);
+        } else if (loot.type === 'medkit') {
+            team.supplies.medkits = (team.supplies.medkits || 0) + 1;
+            logs.push(`[Tick ${tick}] 💊 ${team.name} 搜到 1 个医疗包 (库存: ${team.supplies.medkits})`);
+        } else {
+            // 武器
+            let weaponType = loot.type; // 'closeWeapon' or 'longWeapon'
+            let weapon = loot.weapon;
+            let typeLabel = weaponType === 'closeWeapon' ? '近战' : '远程';
+            // 随机选一名队员
+            let alivePlayers = team.players.filter(p => !p.isDead);
+            if (alivePlayers.length === 0) continue;
+            let player = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+
+            let result = tryReplaceWeapon(player, weapon);
+            if (result.replaced) {
+                let oldLabel = result.oldWeapon ? weaponShortLabel(result.oldWeapon) : '无';
+                logs.push(`[Tick ${tick}] 🔫 ${team.name}-${player.name} 拾取了[${typeLabel}] ${weaponShortLabel(weapon)}，换下了 ${oldLabel}`);
+            } else {
+                logs.push(`[Tick ${tick}] 🗑️ ${team.name}-${player.name} 看了一眼[${typeLabel}] ${weaponShortLabel(weapon)}，觉得不如手上的`);
+            }
+        }
+    }
 
     addTeamComm(team, 'LOOT', tick);
 
-    let log = null;
-    if (nearest.remaining <= 0) {
-        log = `[Tick ${tick}] 📦 资源点 [${nearest.x.toFixed(0)}, ${nearest.y.toFixed(0)}] (${nearest.tier}) 已被搜刮完毕！`;
+    let depletedLog = null;
+    if (nearest.resourceTokens <= 0) {
+        depletedLog = `[Tick ${tick}] 📦 资源点 [${nearest.x.toFixed(0)}, ${nearest.y.toFixed(0)}] (${nearest.tier}) 已被搜刮完毕！`;
     }
 
-    return { looted: true, log };
+    // 返回最新一条武器/补给品 log（避免刷屏），以及枯竭 log
+    let mainLog = logs.length > 0 ? logs[logs.length - 1] : null;
+    let combinedLog = [mainLog, depletedLog].filter(Boolean).join(' | ');
+    return { looted: true, log: combinedLog || null };
 }
 
 function _findNearestResourcePoint(x, y, resourcePoints) {
     let nearest = null;
     let bestDist = Infinity;
     for (let rp of resourcePoints) {
-        if (rp.remaining <= 0) continue;
+        if (rp.resourceTokens <= 0) continue;
         let d = Math.hypot(x - rp.x, y - rp.y);
         if (d < bestDist) {
             bestDist = d;

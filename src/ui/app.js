@@ -269,12 +269,51 @@ function _scheduleRender() {
 }
 
 /**
- * 根据装备值计算理论单次伤害（对应 combat_v2 中 _fireBullet 公式）
+ * 根据队伍近战武器计算理论单次伤害
  */
-function _calcDmgPerShot(equipValue) {
-    let ev = Math.min(equipValue || 0, 100);
-    let mult = 0.3 + 0.7 * ev / 100;
-    return Math.floor(20 * mult);
+function _calcDmgPerShot(team) {
+    if (!team || !team.players) return 20;
+    let bestDmg = 0.55; // 默认 T3
+    team.players.forEach(p => {
+        if (p.closeWeapon && p.closeWeapon.dmgMult > bestDmg) {
+            bestDmg = p.closeWeapon.dmgMult;
+        }
+    });
+    return Math.floor(20 * bestDmg);
+}
+
+/**
+ * 获取队员武器标签（含近战和远程）
+ */
+function _playerWeaponsLabel(p) {
+    let close = p.closeWeapon;
+    let long = p.longWeapon;
+    let closeHtml = close
+        ? `<span style="color:#ff9800;">近:T${close.tier} ${close.name}</span><span style="color:#ffca28;font-size:10px;">💥${Math.floor(20*close.dmgMult)}</span>`
+        : '<span style="color:#555;">近:无</span>';
+    let longHtml = long
+        ? `<span style="color:#64b5f6;">远:T${long.tier} ${long.name}</span><span style="color:#90caf9;font-size:10px;">💥${Math.floor(20*long.dmgMult)}</span>`
+        : '<span style="color:#555;">远:无</span>';
+    return `${closeHtml} ${longHtml}`;
+}
+
+/**
+ * 获取队员武器紧凑标签（一行）
+ */
+function _playerWeaponsCompact(p) {
+    let close = p.closeWeapon;
+    let long = p.longWeapon;
+    let c = close ? `近T${close.tier} ${close.name}💥${Math.floor(20*close.dmgMult)}` : '近:无';
+    let l = long ? `远T${long.tier} ${long.name}` : '远:无';
+    return `${c} | ${l}`;
+}
+
+/**
+ * 获取队伍补给品标签
+ */
+function _suppliesLabel(team) {
+    if (!team || !team.supplies) return '';
+    return `🔋${team.supplies.batteries||0} 💊${team.supplies.medkits||0}`;
 }
 
 /**
@@ -351,9 +390,20 @@ function renderCombatStatusHTML(state, tournament, t) {
             magHtml = `<span style="color:#ffca28;font-size:10px;margin-left:4px;">🔫${mag}</span>`;
         }
 
+        // 武器信息
+        let closeWpn = p.closeWeapon;
+        let longWpn = p.longWeapon;
+        let wpnHtml = '';
+        if (!isDead) {
+            let c = closeWpn ? `<span style="color:#ff9800;">近T${closeWpn.tier} ${closeWpn.name}</span><span style="color:#ffca28;font-size:9px;">💥${Math.floor(20*closeWpn.dmgMult)}</span>` : '<span style="color:#555;">近:无</span>';
+            let l = longWpn ? `<span style="color:#64b5f6;">远T${longWpn.tier} ${longWpn.name}</span>` : '';
+            wpnHtml = `<div style="font-size:9px;margin-top:3px;">${c} ${l}</div>`;
+        }
+
         return `
         <div class="combat-player-card ${isDead?'dead':''}" style="${isDown?'border-color:#b71c1c;':''}">
             <div class="combat-player-name" style="${nameColor}">${p.name}${magHtml}</div>
+            ${wpnHtml}
             <div class="combat-bars">
                 <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%;"></div></div>
                 ${shieldVal > 0 || shieldMax > 0 ? _renderShieldBar(shieldVal, shieldMax) : ''}
@@ -369,10 +419,11 @@ function renderCombatStatusHTML(state, tournament, t) {
     // 非交火 / 死亡状态：简洁卡片布局
     if (t.status !== 'fight') {
         let cards = t.status === 'dead' ? '' : t.players.map(p => renderCard(p, t, false)).join('');
+        let suppLabel = _suppliesLabel(t);
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <strong>${t.name}</strong>
-                <span style="font-size:11px;">${mpText} | 击杀:${t.kills} | 装备:${t.equipValue} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0}</span>
+                <span style="font-size:11px;">${mpText} | 击杀:${t.kills} | ${_evoColorLabel(t)} | ${suppLabel} | 总伤:${t.teamTotalDamage||0}</span>
             </div>
             <div style="font-size:12px; color:#aaa; margin-bottom:8px;">[${statusText}]</div>
             <div class="combat-sides" style="flex-direction:column; gap:6px;">
@@ -394,7 +445,7 @@ function renderCombatStatusHTML(state, tournament, t) {
     };
     let myTerrainVal = _calcTerrainValue(t);
 
-    let myDmg = _calcDmgPerShot(t.equipValue);
+    let myDmg = _calcDmgPerShot(t);
     let allyCards = t.players.map(p => renderCard(p, t, false)).join('');
     let enemyCards = enemyTeams.map(et => {
         let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
@@ -402,8 +453,8 @@ function renderCombatStatusHTML(state, tournament, t) {
         let diff = myTerrainVal - etTerrainVal;
         let diffColor = diff > 0 ? '#4caf50' : (diff < 0 ? '#f44336' : '#aaa');
         let diffText = diff > 0 ? `+${diff}` : `${diff}`;
-        let etDmg = _calcDmgPerShot(et.equipValue);
-        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span> | 装备:${et.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
+        let etDmg = _calcDmgPerShot(et);
+        return `<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:bold;color:#ff8a80;text-align:center;margin-bottom:4px;">${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 地形值:${etTerrainVal} | 优势差:<span style="color:${diffColor};">${diffText}</span></span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>` + et.players.map(p => renderCard(p, et, true)).join('') + `</div>`;
     }).join('');
 
     let myTerrainLabel = t.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${t.microTerrain.name}</span>` : '';
@@ -414,6 +465,8 @@ function renderCombatStatusHTML(state, tournament, t) {
         macroLabel = `<span style="color:#80cbc4;">🗺️${mName}</span>`;
     }
 
+    let mySuppLabel = _suppliesLabel(t);
+
     return `
         <div class="combat-arena">
             <div class="combat-vs-header">
@@ -421,10 +474,10 @@ function renderCombatStatusHTML(state, tournament, t) {
                 <span style="color:#f44336;margin:0 6px;">⚔ VS ⚔</span>
                 <span style="color:#ff8a80;">${enemyNames || '???'}</span>
             </div>
-            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0}${macroLabel ? ' | ' + macroLabel : ''}</div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:8px;">${mpText} | 击杀:${t.kills} | ${_evoColorLabel(t)} | 总伤:${t.teamTotalDamage||0} | ${mySuppLabel}${macroLabel ? ' | ' + macroLabel : ''}</div>
             <div class="combat-sides">
                 <div class="combat-side">
-                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel} <span style="color:#aaa;font-weight:normal;">| 装备:${t.equipValue}</span> <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span></div>
+                    <div class="combat-side-title" style="color:#4caf50;">我方 ${t.name}${myTerrainLabel} <span style="color:#ffca28;font-weight:normal;">💥${myDmg}</span></div>
                     ${allyCards}
                 </div>
                 <div class="combat-side">
@@ -492,10 +545,10 @@ function renderBRState(state, tournament, extraLogs = null) {
             el.style.height = '10px';
             el.style.backgroundColor = rp.color;
             el.style.borderRadius = '50%';
-            el.style.border = rp.remaining <= 0 ? '2px solid #555' : '2px solid #fff';
-            el.style.opacity = rp.remaining <= 0 ? '0.3' : '0.9';
+            el.style.border = rp.resourceTokens <= 0 ? '2px solid #555' : '2px solid #fff';
+            el.style.opacity = rp.resourceTokens <= 0 ? '0.3' : '0.9';
             el.style.zIndex = 7;
-            el.title = `${rp.tier}点 | 剩余:${rp.remaining}/${rp.totalValue}`;
+            el.title = `${rp.tier}点 | 剩余搜索:${rp.resourceTokens}次`;
             mapContainer.appendChild(el);
         });
     }
@@ -604,21 +657,23 @@ function renderBRState(state, tournament, extraLogs = null) {
         let playersInfo = t.status === 'dead' ? '全员淘汰' : t.players.map(p => {
             let s = _shieldHtml(p);
             let st = _stateLabel(p);
-            return `${p.name}: ` + (p.isDown ? `♥️0 ${st}` : `♥️${p.hp.toFixed(0)} ${s} ${st}`);
+            let wpn = _playerWeaponsCompact(p);
+            return `${p.name}: ` + (p.isDown ? `♥️0 ${st}` : `♥️${p.hp.toFixed(0)} ${s} ${st}<br/><span style="font-size:10px;">&nbsp;&nbsp;${wpn}</span>`);
         }).join(' | ');
         let statusText = t.status === 'dead' ? `第 ${t.placement} 名` : (t.status === 'fight' ? '交火中' : (t.status === 'move' ? '跑毒中' : '搜集中'));
         let terrainText = (t.status === 'fight' && t.microTerrain) ? ` | 🌍${t.microTerrain.name}` : '';
         let mpIcon = tournament.teams[t.id].IsMatchPointEligible ? '🔥' : '';
+        let suppLabel = _suppliesLabel(t);
         let nearRP = '';
         if (state.resourcePoints && t.status !== 'dead') {
             let closeRP = state.resourcePoints.find(rp => Math.hypot(t.x - rp.x, t.y - rp.y) < rp.radius);
             if (closeRP) {
-                nearRP = ` | 📦${closeRP.tier}点(${closeRP.remaining})`;
+                nearRP = ` | 📦${closeRP.tier}点(${closeRP.resourceTokens})`;
             }
         }
         
         return `<div class="team-item ${statusClass}">
-            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | 本局装备: ${t.equipValue} | ${_evoColorLabel(t)} | 累计伤害: ${t.teamTotalDamage||0}${nearRP} <br/> 队员: ${playersInfo}
+            <strong>${mpIcon}${t.name}</strong> [${statusText}${terrainText}] - 击杀: ${t.kills} | ${_evoColorLabel(t)} | ${suppLabel} | 累计伤害: ${t.teamTotalDamage||0}${nearRP} <br/> 队员: ${playersInfo}
         </div>`;
     }).join('');
     document.getElementById('teamList').innerHTML = teamListHtml;
@@ -662,9 +717,10 @@ function renderBRState(state, tournament, extraLogs = null) {
                     let et = state.teams[eid];
                     if (!et || et.status === 'dead') return;
                     let etTerrain = et.microTerrain ? ` <span style="color:#ffca28;font-weight:normal;">🌍${et.microTerrain.name}</span>` : '';
-                    let etDmg = _calcDmgPerShot(et.equipValue);
+                    let etDmg = _calcDmgPerShot(et);
+                    let etSupp = _suppliesLabel(et);
                     enemyCards += `<div style="margin-top:8px; padding:6px 10px; background:#2a1111; border-radius:6px; border:1px solid #441111;">
-                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| 装备:${et.equipValue} | ${_evoColorLabel(et)} | 总伤:${et.teamTotalDamage||0}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>
+                        <div style="font-size:12px; font-weight:bold; color:#ff8a80; margin-bottom:6px;">🎯 ${et.name}${etTerrain} <span style="color:#aaa;font-weight:normal;">| ${_evoColorLabel(et)} | ${etSupp} | 总伤:${et.teamTotalDamage||0}</span> <span style="color:#ffca28;font-weight:normal;">💥${etDmg}</span></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">` + et.players.map(p => {
                             let hpPct = Math.max(0, p.hp);
                             let shieldVal = p.shield !== undefined ? Math.max(0, p.shield) : 0;
@@ -680,9 +736,13 @@ function renderBRState(state, tournament, extraLogs = null) {
                             else if (p.state === 'reviving') { stateLabel = '救援'; stateColor = '#9c27b0'; }
                             else if (p.state === 'in_cover') { stateLabel = '缩掩体'; stateColor = '#ff5722'; }
                             else { stateLabel = '空闲'; stateColor = '#4caf50'; }
+                            // 武器信息
+                            let cWpn = p.closeWeapon ? `近T${p.closeWeapon.tier} ${p.closeWeapon.name}` : '近:无';
+                            let lWpn = p.longWeapon ? `远T${p.longWeapon.tier} ${p.longWeapon.name}` : '远:无';
                             return `
                             <div style="flex:1; min-width:80px; background:#1a1a1a; padding:6px; border-radius:4px; border:1px solid #333;">
-                                <div style="font-weight:bold; font-size:12px; margin-bottom:3px;">${p.name}</div>
+                                <div style="font-weight:bold; font-size:12px; margin-bottom:1px;">${p.name}</div>
+                                <div style="font-size:9px;margin-bottom:2px;"><span style="color:#ff9800;">${cWpn}</span> <span style="color:#64b5f6;">${lWpn}</span></div>
                                 <div style="font-size:11px; margin-bottom:3px;">
                                     <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
                                     ${shieldVal > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldVal}</span>` : '<span style="color:#555;"> 🛡️0</span>'}
@@ -706,6 +766,7 @@ function renderBRState(state, tournament, extraLogs = null) {
                 let shieldVal = p.shield !== undefined ? Math.max(0, p.shield) : 0;
                 let sMax = p.shieldMax !== undefined ? p.shieldMax : 50;
                 let mag = p.magAmmo !== undefined ? p.magAmmo : '-';
+                let wpnHtml = _playerWeaponsLabel(p);
                 let stateLabel = '';
                 let stateColor = '#888';
                 if (p.isDead || p.state === 'dead') { stateLabel = '💀淘汰'; stateColor = '#777'; }
@@ -720,7 +781,8 @@ function renderBRState(state, tournament, extraLogs = null) {
 
                 return `
                 <div style="flex:1; min-width:90px; background:#1a1a1a; padding:8px; border-radius:6px; border:1px solid #333;">
-                    <div style="font-weight:bold; font-size:13px; margin-bottom:4px;">${p.name}</div>
+                    <div style="font-weight:bold; font-size:13px; margin-bottom:2px;">${p.name}</div>
+                    <div style="font-size:9px; margin-bottom:4px;">${wpnHtml}</div>
                     <div style="font-size:11px; margin-bottom:4px;">
                         <span style="color:#f44336;">♥️${hpPct.toFixed(0)}</span>
                         ${shieldVal > 0 ? `<span style="color:#2196f3;"> 🛡️${shieldVal}</span>` : '<span style="color:#555;"> 🛡️0</span>'}

@@ -76,6 +76,13 @@ function _initCombatV2(combat, allTeams) {
             if (p.shieldMax === undefined) {
                 p.shieldMax = _getEvoLevel(team.teamTotalDamage).shieldMax;
             }
+            // 补初始化武器（兼容旧数据或劝架加入的队员）
+            if (p.closeWeapon === undefined) {
+                p.closeWeapon = (typeof getRandomT3Weapon === 'function') ? getRandomT3Weapon('close') : { type:'close', tier:3, name:'P2020', nameEn:'P2020', ammoType:'轻型', dmgMult:0.55 };
+            }
+            if (p.longWeapon === undefined) {
+                p.longWeapon = (typeof getRandomT3Weapon === 'function') ? getRandomT3Weapon('long') : { type:'long', tier:3, name:'小帮手', nameEn:'Wingman', ammoType:'重型', dmgMult:0.55 };
+            }
         });
     });
 
@@ -204,10 +211,13 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
         return; // 未命中
     }
 
-    // 命中：基础伤害 20，装备值影响火力倍率
+    // 命中：基础伤害 20，由近战武器等级决定火力倍率
     let baseDmg = 20;
-    let equipMult = 0.3 + 0.7 * Math.min(attackerTeam.equipValue || 0, 100) / 100;
-    let damage = Math.floor(baseDmg * equipMult);
+    let weaponMult = 0.55; // 默认 T3
+    if (attackerPlayer.closeWeapon && attackerPlayer.closeWeapon.dmgMult !== undefined) {
+        weaponMult = attackerPlayer.closeWeapon.dmgMult;
+    }
+    let damage = Math.floor(baseDmg * weaponMult);
     let isHeadshot = false;
     let aimCoeff = attackerTeam._v2AimCoeff || 1.0;
     if (Math.random() < 0.1 * aimCoeff) {
@@ -216,6 +226,9 @@ function _fireBullet(attackerPlayer, attackerTeam, combat, allTeams, tick, logs)
     }
 
     targetPlayer._hitsThisTick++;
+
+    // 记录最后伤害来源（用于舔包）
+    targetTeam._lastDamagerTeamId = attackerTeam.id;
 
     let logMsg = '';
 
@@ -370,16 +383,28 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
             player.revivingTargetId = null;
         }
 
-        // 打电池完成 → 护盾回满至进化甲上限
+        // 打电池完成 → 消耗电池，护盾回满
         if (player.state === 'healing_shield') {
-            player.shield = player.shieldMax || 50;
-            logs.push(`[Tick ${tick}] 🔋 ${team.name}-${player.name} 护盾恢复完毕！(🛡️${player.shield})`);
+            if (team.supplies && team.supplies.batteries > 0) {
+                team.supplies.batteries--;
+                player.shield = player.shieldMax || 50;
+                logs.push(`[Tick ${tick}] 🔋 ${team.name}-${player.name} 使用电池，护盾回满！(库存电池: ${team.supplies.batteries})`);
+            } else {
+                player.shield = player.shieldMax || 50;
+                logs.push(`[Tick ${tick}] ⚠️ ${team.name}-${player.name} 护盾恢复完毕（无电池消耗）`);
+            }
         }
 
-        // 打医疗包完成 → HP 回满
+        // 打医疗包完成 → 消耗医疗包，HP 回满
         if (player.state === 'healing_hp') {
-            player.hp = 100;
-            logs.push(`[Tick ${tick}] 💉 ${team.name}-${player.name} 生命值恢复完毕！`);
+            if (team.supplies && team.supplies.medkits > 0) {
+                team.supplies.medkits--;
+                player.hp = 100;
+                logs.push(`[Tick ${tick}] 💉 ${team.name}-${player.name} 使用医疗包，HP 回满！(库存医疗包: ${team.supplies.medkits})`);
+            } else {
+                player.hp = 100;
+                logs.push(`[Tick ${tick}] ⚠️ ${team.name}-${player.name} HP 恢复完毕（无医疗包消耗）`);
+            }
         }
 
         player.state = 'idle';
@@ -412,19 +437,28 @@ function _processPlayerTick(player, team, combat, allTeams, tick, logs) {
     if (player.shield === 0 && player._hitsThisTick < 2) {
         let beingRevived = team.players.some(p => p.state === 'reviving' && p.revivingTargetId === player.id);
         if (!beingRevived) {
-            player.state = 'healing_shield';
-            player.stateTimer = 15;
-            _tryAddComm(team, 'HEALING_SHIELD', tick, player.name, '');
-            return;
+            // 检查是否有电池
+            if (team.supplies && team.supplies.batteries > 0) {
+                player.state = 'healing_shield';
+                player.stateTimer = 15;
+                _tryAddComm(team, 'HEALING_SHIELD', tick, player.name, '');
+                return;
+            } else {
+                logs.push(`[Tick ${tick}] ⚠️ ${team.name}-${player.name} 想打电池但没有电池了！`);
+            }
         }
     }
 
     // c) HP ≤ 25，未被集火
     if (player.hp <= 25 && player._hitsThisTick < 2) {
-        player.state = 'healing_hp';
-        player.stateTimer = 12;
-        _tryAddComm(team, 'HEALING_HP', tick, player.name, '');
-        return;
+        if (team.supplies && team.supplies.medkits > 0) {
+            player.state = 'healing_hp';
+            player.stateTimer = 12;
+            _tryAddComm(team, 'HEALING_HP', tick, player.name, '');
+            return;
+        } else {
+            logs.push(`[Tick ${tick}] ⚠️ ${team.name}-${player.name} 想打医疗包但没有医疗包了！`);
+        }
     }
 
     // d) 有队友倒地，且自己不是唯一站着的，且未被集火
