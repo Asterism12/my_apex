@@ -970,7 +970,7 @@ function renderBRState(state, tournament, extraLogs = null) {
             if (ttsPlayer.comms.length === 0 || ttsPlayer.comms !== t.comms) {
                ttsPlayer.playerVoices = {};
             }
-            const configs = [{ pitch: 0.8, rate: 3.4 }, { pitch: 1.3, rate: 3.8 }, { pitch: 1.0, rate: 3.3 }];
+            const configs = [{ pitch: 0.8, rate: 6.8 }, { pitch: 1.3, rate: 7.6 }, { pitch: 1.0, rate: 6.6 }];
             if(Object.keys(ttsPlayer.playerVoices).length === 0) {
                t.players.forEach((p, idx) => {
                    ttsPlayer.playerVoices[p.name] = configs[idx % configs.length];
@@ -1041,9 +1041,9 @@ class CommTTSPlayer {
         this.liveQueue = []; 
         
         const configs = [
-            { pitch: 0.8, rate: 3.4 }, 
-            { pitch: 1.3, rate: 3.8 }, 
-            { pitch: 1.0, rate: 3.3 }
+            { pitch: 0.8, rate: 6.8 }, 
+            { pitch: 1.3, rate: 7.6 }, 
+            { pitch: 1.0, rate: 6.6 }
         ];
         players.forEach((p, idx) => {
             this.playerVoices[p.name] = configs[idx % configs.length];
@@ -1068,7 +1068,7 @@ class CommTTSPlayer {
             utterance.voice = voices.find(v => v.lang.includes('zh') || v.name.includes('Chinese')) || voices[0];
         }
 
-        const config = this.playerVoices[nextItem.log.speaker] || { pitch: 1.0, rate: 3.4 };
+        const config = this.playerVoices[nextItem.log.speaker] || { pitch: 1.0, rate: 6.8 };
         utterance.pitch = config.pitch;
         utterance.rate = config.rate;
 
