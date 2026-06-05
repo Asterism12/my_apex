@@ -158,7 +158,7 @@ function setupMatch(state, tournament) {
     // 清理地图残留元素
     const mapContainer = document.getElementById('miniMap');
     Array.from(mapContainer.children).forEach(child => {
-        if (child.id !== 'miniMapRing') child.remove();
+        if (child.id !== 'miniMapRing' && child.id !== 'miniMapTargetRing') child.remove();
     });
     renderBRState(state, tournament);
 }
@@ -609,10 +609,17 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
 
 function renderBRState(state, tournament, extraLogs = null) {
     let aliveCount = state.aliveTeamsCount;
+    let ringStageText = '';
+    if (state.ring.stage <= 6) {
+        let phaseLabel = state.ring.phase === 'wait' ? '⏳等待中' : '🔴缩圈中';
+        ringStageText = `第${state.ring.stage}阶段 ${phaseLabel}`;
+    } else {
+        ringStageText = '最终圈';
+    }
     document.getElementById('mapStatus').innerHTML = `
         <div style="display:flex; justify-content: space-between; margin-bottom: 10px;">
             <span>Tick: ${state.tick}</span>
-            <span>安全区半径: ${state.ring.radius.toFixed(1)}m</span>
+            <span>${ringStageText} | 安全区半径: ${state.ring.radius.toFixed(1)}m</span>
             <span>存活队伍: <strong style="color:#ffca28;">${aliveCount} / 20</strong></span>
         </div>
     `;
@@ -630,6 +637,40 @@ function renderBRState(state, tournament, extraLogs = null) {
     ringEl.style.top = `${rY}px`;
 
     const mapContainer = document.getElementById('miniMap');
+
+    // 缩圈期绘制目标圈虚线预览
+    let targetRingEl = document.getElementById('miniMapTargetRing');
+    if (!targetRingEl) {
+        targetRingEl = document.createElement('div');
+        targetRingEl.id = 'miniMapTargetRing';
+        targetRingEl.style.position = 'absolute';
+        targetRingEl.style.border = '2px dashed rgba(255, 152, 0, 0.7)';
+        targetRingEl.style.borderRadius = '50%';
+        targetRingEl.style.boxSizing = 'border-box';
+        targetRingEl.style.pointerEvents = 'none';
+        targetRingEl.style.zIndex = 10;
+        mapContainer.appendChild(targetRingEl);
+    }
+    // 等待期和缩圈期均显示下一个目标圈的虚线预览（队伍可提前知道下一个圈在哪）
+    if (state.ring.stage <= 6) {
+        let tR = state.ring.targetRadius * MAP_RATIO;
+        let tX = state.ring.targetX * MAP_RATIO - tR;
+        let tY = state.ring.targetY * MAP_RATIO - tR;
+        targetRingEl.style.display = 'block';
+        targetRingEl.style.width = `${tR * 2}px`;
+        targetRingEl.style.height = `${tR * 2}px`;
+        targetRingEl.style.left = `${tX}px`;
+        targetRingEl.style.top = `${tY}px`;
+        // 等待期用不同颜色区分：蓝色虚线=等待中可预览，橙黄虚线=正在缩圈
+        if (state.ring.phase === 'wait') {
+            targetRingEl.style.border = '2px dashed rgba(66, 165, 245, 0.6)';
+        } else {
+            targetRingEl.style.border = '2px dashed rgba(255, 152, 0, 0.7)';
+        }
+    } else {
+        targetRingEl.style.display = 'none';
+    }
+
     document.querySelectorAll('.map-combat, .map-resource, .map-zone').forEach(el => el.remove());
 
     // 渲染地形层 Zone（矩形）

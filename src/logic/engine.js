@@ -4,7 +4,31 @@
 
 const DEFAULT_SHRINK_SPEED = 4;
 
+// 缩圈阶段配置 (Ring 1 ~ Ring 6)
+// 每阶段: 等待期(wait) → 缩圈期(shrink) → 进入下一阶段
+// 圈半径放大 ~35%，等待时长 ×4，缩圈速度 ÷4，总时长约为原始版本的 4 倍
+const RING_STAGES = [
+    { targetRadius: 950, waitTicks: 240, shrinkSpeed: 1.25, damagePerTick: 1 },
+    { targetRadius: 600, waitTicks: 200, shrinkSpeed: 1.25, damagePerTick: 2 },
+    { targetRadius: 380, waitTicks: 160, shrinkSpeed: 1.05, damagePerTick: 3 },
+    { targetRadius: 200, waitTicks: 120, shrinkSpeed: 1.05, damagePerTick: 4 },
+    { targetRadius: 110, waitTicks: 80,  shrinkSpeed: 0.75, damagePerTick: 5 },
+    { targetRadius: 35,  waitTicks: 40,  shrinkSpeed: 0.7,  damagePerTick: 8 }
+];
+
 const PLACEMENT_SCORES = [0, 12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
+
+// 随机生成下一阶段安全区目标圆心（约束：目标圈完全位于当前圈内）
+function _generateRingTarget(currentX, currentY, currentRadius, targetRadius) {
+    let maxOffset = currentRadius - targetRadius;
+    if (maxOffset < 0) maxOffset = 0;
+    let angle = Math.random() * 2 * Math.PI;
+    let dist = Math.random() * maxOffset * 0.9; // 留10%边距，避免贴边
+    return {
+        x: currentX + Math.cos(angle) * dist,
+        y: currentY + Math.sin(angle) * dist
+    };
+}
 
 let tournamentState = null;
 
@@ -142,10 +166,25 @@ function initMatch() {
         }
     }
 
+    // 初始化安全区：初始圈半径 1500 > 地图对角线半长(~1414)，确保完全覆盖整个地图
+    // 随后从 1500 缩至第一阶段目标半径 700，实现"从地图外开始缩圈"的效果
+    let stage1 = RING_STAGES[0];
+    let initTarget = _generateRingTarget(1000, 1000, 1500, stage1.targetRadius);
+
     return {
         tick: 0,
         status: 'running',
-        ring: { x: 1000, y: 1000, radius: 1000, stage: 1 },
+        ring: {
+            x: 1000, y: 1000, radius: 1500,       // 当前圈（初始大于全图）
+            stage: 1,                                // 当前阶段 1~6
+            phase: 'wait',                           // 'wait' | 'shrink'
+            phaseTimer: 0,                           // 当前子阶段已过 tick
+            targetX: initTarget.x,                   // 本阶段目标圆心
+            targetY: initTarget.y,
+            targetRadius: stage1.targetRadius,       // 本阶段目标半径
+            shrinkSpeed: stage1.shrinkSpeed,         // 缩圈速度
+            damagePerTick: stage1.damagePerTick      // 当前圈外伤害
+        },
         teams: teamsData,
         combats: [],
         logs: initLogs,
@@ -167,39 +206,93 @@ function processBRTick(state) {
         Object.values(newState.teams).forEach(t => addTeamComm(t, 'DROP', newState.tick));
     }
 
-    // 1. 缩圈逻辑
-    if (newState.tick % 10 === 0 && newState.ring.radius > 50) {
-        newState.ring.radius -= tournamentState.gameConfig.shrinkSpeed; 
+    // 1. 缩圈阶段推进
+    let ring = newState.ring;
+    if (ring.stage <= RING_STAGES.length) {
+        let stageCfg = RING_STAGES[ring.stage - 1];
+        ring.phaseTimer++;
+
+        if (ring.phase === 'wait') {
+            // 等待期结束 → 进入缩圈期
+            if (ring.phaseTimer >= stageCfg.waitTicks) {
+                ring.phase = 'shrink';
+                ring.phaseTimer = 0;
+                ring.shrinkSpeed = stageCfg.shrinkSpeed;
+                ring.damagePerTick = stageCfg.damagePerTick;
+                newState.logs.push(`🔵 第 ${ring.stage} 阶段缩圈开始！安全区向 (${Math.round(ring.targetX)}, ${Math.round(ring.targetY)}) 收缩至半径 ${stageCfg.targetRadius}（圈外伤害: ${stageCfg.damagePerTick}/tick）`);
+            }
+        } else if (ring.phase === 'shrink') {
+            // 缩圈中：半径递减，圆心向目标平滑移动
+            if (ring.radius > stageCfg.targetRadius) {
+                ring.radius = Math.max(stageCfg.targetRadius, ring.radius - ring.shrinkSpeed);
+                // 圆心向目标圆心插值
+                let dx = ring.targetX - ring.x;
+                let dy = ring.targetY - ring.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist > 0.5) {
+                    let remainingShrink = ring.radius - stageCfg.targetRadius + ring.shrinkSpeed;
+                    let fraction = Math.min(1, ring.shrinkSpeed / Math.max(0.1, remainingShrink));
+                    ring.x += dx * fraction;
+                    ring.y += dy * fraction;
+                }
+            }
+
+            // 缩圈完成 → 进入下一阶段
+            if (ring.radius <= stageCfg.targetRadius) {
+                ring.radius = stageCfg.targetRadius;
+                ring.x = ring.targetX;
+                ring.y = ring.targetY;
+                newState.logs.push(`✅ 第 ${ring.stage} 阶段缩圈完成！安全区半径: ${ring.radius}`);
+                ring.stage++;
+                if (ring.stage <= RING_STAGES.length) {
+                    // 随机生成下一阶段目标
+                    let nextCfg = RING_STAGES[ring.stage - 1];
+                    let nextTarget = _generateRingTarget(ring.x, ring.y, ring.radius, nextCfg.targetRadius);
+                    ring.targetX = nextTarget.x;
+                    ring.targetY = nextTarget.y;
+                    ring.targetRadius = nextCfg.targetRadius;
+                    ring.shrinkSpeed = nextCfg.shrinkSpeed;
+                    ring.damagePerTick = nextCfg.damagePerTick;
+                    ring.phase = 'wait';
+                    ring.phaseTimer = 0;
+                    newState.logs.push(`📍 第 ${ring.stage} 阶段安全区已刷新，目标圆心 (${Math.round(ring.targetX)}, ${Math.round(ring.targetY)})，半径 ${ring.targetRadius}，等待 ${nextCfg.waitTicks} tick 后开始缩圈`);
+                } else {
+                    // 最终阶段完成，圈不再变化
+                    newState.logs.push(`⚠️ 最终安全区已定型！决战时刻！`);
+                }
+            }
+        }
     }
 
     // 2. 队伍状态更新与移动
+    // 队伍始终朝「下一个圈的目标圆心」移动（等待期即可看到目标圈位置，提前向该区域靠拢）
+    let effectiveCenterX = ring.targetX;
+    let effectiveCenterY = ring.targetY;
+
     let aliveTeams = [];
-    let shrinkSpeed = tournamentState.gameConfig.shrinkSpeed;
     Object.values(newState.teams).forEach(team => {
         if (team.status === 'dead') return;
 
-        let distToTarget = Math.hypot(team.x - newState.ring.x, team.y - newState.ring.y);
-        // 预判：下一次缩圈后是否还在安全区内？提前向圈内移动
-        let predictedRadius = newState.ring.radius - shrinkSpeed;
-        let isOutsideOrSoon = distToTarget > predictedRadius;
-        let isOutside = distToTarget > newState.ring.radius;
+        let distToCenter = Math.hypot(team.x - ring.x, team.y - ring.y);
+        let distToTarget = Math.hypot(team.x - ring.targetX, team.y - ring.targetY);
+        let isOutside = distToCenter > ring.radius;
+        // 已进入目标圈内 → 安全，无需再跑毒
+        let isInsideTarget = distToTarget <= ring.targetRadius;
 
         if (isOutside) {
             addTeamComm(team, 'RING_MOVE', newState.tick);
-            team.players.forEach(p => { if(!p.isDown) p.hp -= 1; });
+            team.players.forEach(p => { if(!p.isDown) p.hp -= ring.damagePerTick; });
             checkTeamAlive(team, newState);
         }
 
         if (team.status !== 'fight' && team.status !== 'dead') {
-            if (isOutsideOrSoon) {
-                team.x -= (team.x - newState.ring.x) * 0.1;
-                team.y -= (team.y - newState.ring.y) * 0.1;
+            if (isOutside) {
+                // 圈外 → 向目标圈心奔跑（速度较慢，模拟实战跑毒节奏）
+                team.x -= (team.x - effectiveCenterX) * 0.04;
+                team.y -= (team.y - effectiveCenterY) * 0.04;
                 team.status = 'move';
-                if (!isOutside) {
-                    // 提前进圈也播报一下
-                    addTeamComm(team, 'RING_MOVE', newState.tick);
-                }
-            } else {
+            } else if (isInsideTarget) {
+                // 已在目标圈内 → 安全，搜刮或随机巡逻
                 let searchResult = _processLoot(team, newState.teams, newState.resourcePoints, newState.terrainZones, newState.tick);
                 if (searchResult.looted) {
                     team.status = 'loot';
@@ -208,6 +301,17 @@ function processBRTick(state) {
                     team.status = 'move';
                     team.x += (Math.random() - 0.5) * 40;
                     team.y += (Math.random() - 0.5) * 40;
+                }
+            } else {
+                // 当前圈内但尚未进入目标圈 → 搜刮后慢速向目标圈靠拢
+                let searchResult = _processLoot(team, newState.teams, newState.resourcePoints, newState.terrainZones, newState.tick);
+                if (searchResult.looted) {
+                    team.status = 'loot';
+                    if (searchResult.log) newState.logs.push(searchResult.log);
+                } else {
+                    team.status = 'move';
+                    team.x -= (team.x - effectiveCenterX) * 0.02;
+                    team.y -= (team.y - effectiveCenterY) * 0.02;
                 }
             }
         }
@@ -273,13 +377,15 @@ function processBRTick(state) {
     newState.combats.forEach(combat => {
         let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t && t.status !== 'dead');
 
-        // 如果战斗地点即将不在安全区内，向圈内迁移（防止长时间战斗因缩圈变成圈外打架）
-        let combatDist = Math.hypot(combat.x - newState.ring.x, combat.y - newState.ring.y);
-        let predictedRadius = newState.ring.radius - tournamentState.gameConfig.shrinkSpeed;
-        if (combatDist > predictedRadius) {
+        // 如果战斗地点即将不在安全区内，向目标圈内迁移（防止长时间战斗因缩圈变成圈外打架）
+        let combatDist = Math.hypot(combat.x - ring.x, combat.y - ring.y);
+        let predictedCombatRadius = ring.phase === 'shrink'
+            ? Math.max(ring.targetRadius, ring.radius - ring.shrinkSpeed)
+            : ring.radius;
+        if (combatDist > predictedCombatRadius) {
             let oldX = combat.x, oldY = combat.y;
-            combat.x -= (combat.x - newState.ring.x) * 0.1;
-            combat.y -= (combat.y - newState.ring.y) * 0.1;
+            combat.x -= (combat.x - effectiveCenterX) * 0.1;
+            combat.y -= (combat.y - effectiveCenterY) * 0.1;
             // 同步更新所有参战队伍的位置
             combat.teams.forEach(tid => {
                 let t = newState.teams[tid];
