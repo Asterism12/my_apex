@@ -18,16 +18,30 @@ const RING_STAGES = [
 
 const PLACEMENT_SCORES = [0, 12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
 
-// 随机生成下一阶段安全区目标圆心（约束：目标圈完全位于当前圈内）
+// 地图边界常量
+const MAP_MIN_X = 0;
+const MAP_MAX_X = 2000;
+const MAP_MIN_Y = 0;
+const MAP_MAX_Y = 2000;
+
+// 随机生成下一阶段安全区目标圆心（约束：目标圈完全位于当前圈内，且完全位于地图内）
 function _generateRingTarget(currentX, currentY, currentRadius, targetRadius) {
     let maxOffset = currentRadius - targetRadius;
     if (maxOffset < 0) maxOffset = 0;
-    let angle = Math.random() * 2 * Math.PI;
-    let dist = Math.random() * maxOffset * 0.9; // 留10%边距，避免贴边
-    return {
-        x: currentX + Math.cos(angle) * dist,
-        y: currentY + Math.sin(angle) * dist
-    };
+    // 计算目标圆心允许的范围：必须同时满足「在当前圈内」和「在地图内」
+    let minX = Math.max(currentX - maxOffset, MAP_MIN_X + targetRadius);
+    let maxX = Math.min(currentX + maxOffset, MAP_MAX_X - targetRadius);
+    let minY = Math.max(currentY - maxOffset, MAP_MIN_Y + targetRadius);
+    let maxY = Math.min(currentY + maxOffset, MAP_MAX_Y - targetRadius);
+    // 如果约束冲突（极小概率），使用地图边界约束优先
+    if (minX > maxX) { minX = MAP_MIN_X + targetRadius; maxX = MAP_MAX_X - targetRadius; }
+    if (minY > maxY) { minY = MAP_MIN_Y + targetRadius; maxY = MAP_MAX_Y - targetRadius; }
+    let rangeX = maxX - minX;
+    let rangeY = maxY - minY;
+    // 在允许范围内随机选点，留10%内边距避免贴边
+    let targetX = minX + rangeX * 0.05 + Math.random() * rangeX * 0.9;
+    let targetY = minY + rangeY * 0.05 + Math.random() * rangeY * 0.9;
+    return { x: targetX, y: targetY };
 }
 
 let tournamentState = null;

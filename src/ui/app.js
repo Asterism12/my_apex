@@ -12,6 +12,7 @@ let isPaused = false;
 let followedTeamId = null;
 let lastFollowedCommIndex = 0;
 let isTourBoardExpanded = false;
+let _lastFollowedPlayer0State = null;  // 追踪队伍第一个队员的上一个状态，用于音效触发
 
 let _pendingState = null;
 let _pendingTournament = null;
@@ -135,7 +136,9 @@ function setupMatch(state, tournament) {
     Object.values(state.teams).forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = t.name;
+        const eliminated = t.status === 'dead';
+        opt.textContent = eliminated ? `${t.name}（已淘汰）` : t.name;
+        if (eliminated) opt.style.color = '#888';
         followSelect.appendChild(opt);
     });
     // Check if we need to preserve followedTeamId
@@ -151,6 +154,8 @@ function setupMatch(state, tournament) {
     _pendingLogs = [];
     _pendingState = null;
     _pendingTournament = null;
+    _lastFollowedPlayer0State = null;
+    audioManager.stopAll();
     if (_rAFId) {
         cancelAnimationFrame(_rAFId);
         _rAFId = null;
@@ -196,6 +201,8 @@ document.getElementById('followTeamSelect').addEventListener('change', (e) => {
     followedTeamId = e.target.value;
     document.getElementById('liveTeamLogs').innerHTML = ''; 
     ttsPlayer.stop();
+    audioManager.stopAll();
+    _lastFollowedPlayer0State = null;
     
     const response = sendBRAction({ type: 'GET_STATE' });
     if (response.success && response.state.teams[followedTeamId]) {
@@ -261,8 +268,9 @@ function _scheduleRender() {
     _rAFId = requestAnimationFrame(() => {
         _rAFId = null;
         if (_pendingState && _pendingState.tick !== _lastRenderTick) {
+            const tick = _pendingState.tick;
             renderBRState(_pendingState, _pendingTournament, _pendingLogs);
-            _lastRenderTick = _pendingState.tick;
+            _lastRenderTick = tick;
             _pendingLogs = [];
         }
     });
@@ -570,6 +578,10 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
         let target = targetMap[s.targetName];
         if (!target) return '';
 
+        // 过滤敌方互射：当射手和目标都在右侧（敌方阵营）时，
+        // 说明是敌方A→敌方B的互射，不应画成横跨左右的红色枪线
+        if (s.fromSide === 'right' && target.side === 'right') return '';
+
         // 使用 slotIdx 计算 Y 坐标：每个槽位 = 一张卡片高度 + 间距
         let fromY = TITLE_OFFSET + s.fromIdx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
         let toY = TITLE_OFFSET + target.slotIdx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
@@ -811,6 +823,16 @@ function renderBRState(state, tournament, extraLogs = null) {
         return `<span style="color:${color};">🛡️${p.shield}</span>`;
     };
 
+    // 动态更新追踪队伍下拉框的淘汰状态
+    const followSelect = document.getElementById('followTeamSelect');
+    Array.from(followSelect.options).forEach(opt => {
+        const team = state.teams[opt.value];
+        if (team && team.status === 'dead' && !opt.textContent.includes('（已淘汰）')) {
+            opt.textContent = `${team.name}（已淘汰）`;
+            opt.style.color = '#888';
+        }
+    });
+
     const teamListHtml = Object.values(state.teams).map(t => {
         let statusClass = t.status === 'dead' ? 'team-dead' : (t.status === 'fight' ? 'team-fighting' : 'team-alive');
         let playersInfo = t.status === 'dead' ? '全员淘汰' : t.players.map(p => {
@@ -962,6 +984,44 @@ function renderBRState(state, tournament, extraLogs = null) {
         
         document.getElementById('liveTeamStatus').innerHTML = renderCombatStatusHTML(state, tournament, t);
 
+        // ===== 音效：当前队伍第一个队员的动作音效 =====
+        if (t.players && t.players.length > 0) {
+            const p0 = t.players[0];
+            const hasCloseWeapon = p0.closeWeapon && p0.closeWeapon.type === 'close';
+
+            // 武器动作（需持有近战武器）
+            const weaponStates = ['shooting', 'reloading'];
+            // 物品动作（无需武器）
+            const itemStates = ['healing_shield', 'healing_hp'];
+            const allAudioStates = [...weaponStates, ...itemStates];
+
+            const rawState = p0.state;
+            const currentState = allAudioStates.includes(rawState) ? rawState : null;
+            // 武器动作需要持有近战武器才播放
+            const effectiveState = (currentState && weaponStates.includes(currentState) && !hasCloseWeapon)
+                ? null
+                : currentState;
+
+            // 状态变化时触发音效
+            if (effectiveState && effectiveState !== _lastFollowedPlayer0State) {
+                switch (effectiveState) {
+                    case 'shooting':
+                        audioManager.play('r99_fire', 'resources/audio/R99-开火.mp3');
+                        break;
+                    case 'reloading':
+                        audioManager.play('r99_reload', 'resources/audio/R99-换弹.mp3');
+                        break;
+                    case 'healing_shield':
+                        audioManager.play('heal_shield', 'resources/audio/打电.mp3');
+                        break;
+                    case 'healing_hp':
+                        audioManager.play('heal_hp', 'resources/audio/打药.mp3');
+                        break;
+                }
+            }
+            _lastFollowedPlayer0State = effectiveState;
+        }
+
         const logsContainer = document.getElementById('liveTeamLogs');
         const liveTtsEnabled = document.getElementById('liveTtsToggle').checked;
 
@@ -1019,6 +1079,108 @@ function renderBRState(state, tournament, extraLogs = null) {
             }
             logsDiv.prepend(p);
         });
+    }
+}
+
+// ----------------------------------------------------
+// 武器音效管理系统
+// ----------------------------------------------------
+class ApexAudioManager {
+    constructor() {
+        /** @type {Map<string, HTMLAudioElement>} 音效类型 → Audio 元素 */
+        this._audioCache = new Map();
+        /** @type {string|null} 当前正在播放的音效类型 */
+        this._currentType = null;
+        /** @type {number} 全局音量 0~1 */
+        this._volume = 0.5;
+    }
+
+    /**
+     * 设置全局音量
+     * @param {number} vol - 音量值 0~1
+     */
+    setVolume(vol) {
+        this._volume = Math.max(0, Math.min(1, vol));
+        this._audioCache.forEach(audio => {
+            audio.volume = this._volume;
+        });
+    }
+
+    /**
+     * 预加载音效文件
+     * @param {string} type - 音效类型标识，如 'fire', 'reload'
+     * @param {string} src - 音频文件路径
+     */
+    preload(type, src) {
+        if (this._audioCache.has(type)) return;
+        const audio = new Audio(src);
+        audio.preload = 'auto';
+        audio.volume = this._volume;
+        this._audioCache.set(type, audio);
+    }
+
+    /**
+     * 播放音效
+     * - 同类型音效正在播放 → 不打断，继续播放
+     * - 不同类型音效正在播放 → 打断后播放新的
+     * @param {string} type - 音效类型标识
+     * @param {string} src - 音频文件路径（若未预加载则自动加载）
+     */
+    play(type, src) {
+        // 同类型已在播放，不打断
+        if (this._currentType === type) {
+            const audio = this._audioCache.get(type);
+            if (audio && !audio.paused && !audio.ended) {
+                return;
+            }
+        }
+
+        // 不同类型或未在播放：先停止当前音效
+        if (this._currentType && this._currentType !== type) {
+            const prevAudio = this._audioCache.get(this._currentType);
+            if (prevAudio) {
+                prevAudio.pause();
+                prevAudio.currentTime = 0;
+            }
+        }
+
+        // 获取或创建音频元素
+        let audio = this._audioCache.get(type);
+        if (!audio) {
+            audio = new Audio(src);
+            audio.preload = 'auto';
+            audio.volume = this._volume;
+            this._audioCache.set(type, audio);
+        }
+
+        // 确保音量同步
+        audio.volume = this._volume;
+
+        // 重置并播放
+        audio.currentTime = 0;
+        audio.play().catch(() => {
+            // 浏览器自动播放策略可能阻止，静默处理
+        });
+
+        this._currentType = type;
+
+        // 播放结束后清除当前类型标记
+        audio.onended = () => {
+            if (this._currentType === type) {
+                this._currentType = null;
+            }
+        };
+    }
+
+    /**
+     * 停止所有音效
+     */
+    stopAll() {
+        this._audioCache.forEach(audio => {
+            audio.pause();
+            audio.currentTime = 0;
+        });
+        this._currentType = null;
     }
 }
 
@@ -1146,9 +1308,23 @@ class CommTTSPlayer {
     }
 }
 const ttsPlayer = new CommTTSPlayer();
+const audioManager = new ApexAudioManager();
+
+// 预加载武器音效 & 物品音效
+audioManager.preload('r99_fire', 'resources/audio/R99-开火.mp3');
+audioManager.preload('r99_reload', 'resources/audio/R99-换弹.mp3');
+audioManager.preload('heal_shield', 'resources/audio/打电.mp3');
+audioManager.preload('heal_hp', 'resources/audio/打药.mp3');
 
 document.getElementById('playAudioBtn').addEventListener('click', () => ttsPlayer.play());
 document.getElementById('stopAudioBtn').addEventListener('click', () => ttsPlayer.stop());
+
+// 音效音量滑块
+document.getElementById('sfxVolume').addEventListener('input', (e) => {
+    const vol = parseInt(e.target.value) / 100;
+    audioManager.setVolume(vol);
+    document.getElementById('sfxVolumeLabel').textContent = e.target.value + '%';
+});
 
 function showCommsReview(state) {
     document.getElementById('commsReview').style.display = 'block';
