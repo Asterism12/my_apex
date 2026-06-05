@@ -174,21 +174,31 @@ function processBRTick(state) {
 
     // 2. 队伍状态更新与移动
     let aliveTeams = [];
+    let shrinkSpeed = tournamentState.gameConfig.shrinkSpeed;
     Object.values(newState.teams).forEach(team => {
         if (team.status === 'dead') return;
 
         let distToTarget = Math.hypot(team.x - newState.ring.x, team.y - newState.ring.y);
-        if (distToTarget > newState.ring.radius) {
+        // 预判：下一次缩圈后是否还在安全区内？提前向圈内移动
+        let predictedRadius = newState.ring.radius - shrinkSpeed;
+        let isOutsideOrSoon = distToTarget > predictedRadius;
+        let isOutside = distToTarget > newState.ring.radius;
+
+        if (isOutside) {
             addTeamComm(team, 'RING_MOVE', newState.tick);
             team.players.forEach(p => { if(!p.isDown) p.hp -= 1; });
             checkTeamAlive(team, newState);
         }
 
         if (team.status !== 'fight' && team.status !== 'dead') {
-            if (distToTarget > newState.ring.radius) {
+            if (isOutsideOrSoon) {
                 team.x -= (team.x - newState.ring.x) * 0.1;
                 team.y -= (team.y - newState.ring.y) * 0.1;
                 team.status = 'move';
+                if (!isOutside) {
+                    // 提前进圈也播报一下
+                    addTeamComm(team, 'RING_MOVE', newState.tick);
+                }
             } else {
                 let searchResult = _processLoot(team, newState.teams, newState.resourcePoints, newState.terrainZones, newState.tick);
                 if (searchResult.looted) {
@@ -262,6 +272,24 @@ function processBRTick(state) {
     let finalCombats = [];
     newState.combats.forEach(combat => {
         let fightingTeams = combat.teams.map(tid => newState.teams[tid]).filter(t => t && t.status !== 'dead');
+
+        // 如果战斗地点即将不在安全区内，向圈内迁移（防止长时间战斗因缩圈变成圈外打架）
+        let combatDist = Math.hypot(combat.x - newState.ring.x, combat.y - newState.ring.y);
+        let predictedRadius = newState.ring.radius - tournamentState.gameConfig.shrinkSpeed;
+        if (combatDist > predictedRadius) {
+            let oldX = combat.x, oldY = combat.y;
+            combat.x -= (combat.x - newState.ring.x) * 0.1;
+            combat.y -= (combat.y - newState.ring.y) * 0.1;
+            // 同步更新所有参战队伍的位置
+            combat.teams.forEach(tid => {
+                let t = newState.teams[tid];
+                if (t && t.status !== 'dead') {
+                    t.x = combat.x;
+                    t.y = combat.y;
+                }
+            });
+            newState.logs.push(`[Tick ${newState.tick}] 🔥 安全区缩小，战斗地点向圈内迁移 (${Math.round(oldX)},${Math.round(oldY)}) → (${Math.round(combat.x)},${Math.round(combat.y)})`);
+        }
 
         if (fightingTeams.length <= 1) {
             _distributeEliminatedEquip(combat, newState.teams, newState.tick, newState.logs);
@@ -449,22 +477,41 @@ function _distributeEliminatedEquip(combat, teams, tick, logs) {
             supplyParts.push(`医疗包×${medkitGain}`);
         }
 
-        // 武器择优替换
+        // 武器择优替换：每把死者武器只能被一名队员拿走
         let weaponUpgrades = [];
-        looterTeam.players.forEach(myP => {
-            if (myP.isDead) return;
-            elim.players.forEach(deadP => {
-                if (deadP.closeWeapon && (!myP.closeWeapon || deadP.closeWeapon.tier < myP.closeWeapon.tier)) {
-                    let oldLabel = myP.closeWeapon ? weaponShortLabel(myP.closeWeapon) : '无';
-                    myP.closeWeapon = { ...deadP.closeWeapon };
-                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(deadP.closeWeapon)}`);
+        // 收集所有死者的武器池
+        let deadCloseWeapons = [];
+        let deadLongWeapons = [];
+        elim.players.forEach(deadP => {
+            if (deadP.closeWeapon) deadCloseWeapons.push(deadP.closeWeapon);
+            if (deadP.longWeapon) deadLongWeapons.push(deadP.longWeapon);
+        });
+        // 按 tier 升序排列（更好的武器优先分配）
+        deadCloseWeapons.sort((a, b) => a.tier - b.tier);
+        deadLongWeapons.sort((a, b) => a.tier - b.tier);
+
+        // 分配近战武器：每把武器只给第一个需要的队员
+        deadCloseWeapons.forEach(weapon => {
+            for (let myP of looterTeam.players) {
+                if (myP.isDead) continue;
+                if (!myP.closeWeapon || weapon.tier < myP.closeWeapon.tier) {
+                    myP.closeWeapon = { ...weapon };
+                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(weapon)}`);
+                    break; // 这把武器已被拿走，不再分配给其他人
                 }
-                if (deadP.longWeapon && (!myP.longWeapon || deadP.longWeapon.tier < myP.longWeapon.tier)) {
-                    let oldLabel = myP.longWeapon ? weaponShortLabel(myP.longWeapon) : '无';
-                    myP.longWeapon = { ...deadP.longWeapon };
-                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(deadP.longWeapon)}(远)`);
+            }
+        });
+
+        // 分配远程武器：每把武器只给第一个需要的队员
+        deadLongWeapons.forEach(weapon => {
+            for (let myP of looterTeam.players) {
+                if (myP.isDead) continue;
+                if (!myP.longWeapon || weapon.tier < myP.longWeapon.tier) {
+                    myP.longWeapon = { ...weapon };
+                    weaponUpgrades.push(`${myP.name}→${weaponShortLabel(weapon)}(远)`);
+                    break; // 这把武器已被拿走，不再分配给其他人
                 }
-            });
+            }
         });
 
         // 清零败方

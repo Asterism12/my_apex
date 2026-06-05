@@ -526,11 +526,26 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
         }
     });
 
-    // 收集敌方射击信息
+    // 收集敌方射击信息（使用全局槽位索引）
+    // 先计算每个敌方队伍的槽位起始偏移
+    const CARD_EST_H = 90;
+    const CARD_GAP = 6;
+    const TITLE_OFFSET = 25;
+    const TEAM_HEADER_SLOTS = 1; // 每个敌方队伍标题占 1 个卡片槽位
+
+    let enemySlotOffsets = [];
+    let runningSlots = 0;
+    enemyTeams.forEach((et) => {
+        enemySlotOffsets.push(runningSlots);
+        let aliveCount = et.players.filter(p => !p.isDead).length;
+        runningSlots += TEAM_HEADER_SLOTS + aliveCount;
+    });
+
     enemyTeams.forEach((et, etIdx) => {
+        let baseSlot = enemySlotOffsets[etIdx] + TEAM_HEADER_SLOTS; // 跳过队伍标题槽位
         et.players.forEach((p, pIdx) => {
             if (p.state === 'shooting' && p._lastTargetName && !p.isDead && !p.isDown) {
-                allShooters.push({ fromSide: 'right', fromIdx: pIdx, fromName: p.name, targetName: p._lastTargetName, targetTeam: p._lastTargetTeam, color: '#f44336', fromTeamIdx: etIdx });
+                allShooters.push({ fromSide: 'right', fromIdx: baseSlot + pIdx, fromName: p.name, targetName: p._lastTargetName, targetTeam: p._lastTargetTeam, color: '#f44336', fromTeamIdx: etIdx });
             }
         });
     });
@@ -539,19 +554,15 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
         return '';
     }
 
-    // 估算卡片位置：每张卡片约 90px 高，6px gap，标题约 25px
-    const CARD_EST_H = 90;
-    const CARD_GAP = 6;
-    const TITLE_OFFSET = 25;
-
-    // 构建目标查找：name → { side, idx }
+    // 构建目标查找：name → { side, slotIdx }
     let targetMap = {};
     allyTeam.players.forEach((p, idx) => {
-        if (!p.isDead) targetMap[p.name] = { side: 'left', idx };
+        if (!p.isDead) targetMap[p.name] = { side: 'left', slotIdx: idx };
     });
     enemyTeams.forEach((et, etIdx) => {
+        let baseSlot = enemySlotOffsets[etIdx] + TEAM_HEADER_SLOTS;
         et.players.forEach((p, pIdx) => {
-            if (!p.isDead) targetMap[p.name] = { side: 'right', idx: pIdx, teamIdx: etIdx };
+            if (!p.isDead) targetMap[p.name] = { side: 'right', slotIdx: baseSlot + pIdx, teamIdx: etIdx };
         });
     });
 
@@ -559,8 +570,9 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
         let target = targetMap[s.targetName];
         if (!target) return '';
 
+        // 使用 slotIdx 计算 Y 坐标：每个槽位 = 一张卡片高度 + 间距
         let fromY = TITLE_OFFSET + s.fromIdx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
-        let toY = TITLE_OFFSET + target.idx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
+        let toY = TITLE_OFFSET + target.slotIdx * (CARD_EST_H + CARD_GAP) + CARD_EST_H / 2;
 
         let x1, x2;
         if (s.fromSide === 'left') {
@@ -578,9 +590,11 @@ function _buildGunLinesSVG(allyTeam, enemyTeams) {
         </line>`;
     }).filter(l => l).join('\n');
 
-    let totalPlayers = Math.max(allyTeam.players.filter(p => !p.isDead).length,
-        enemyTeams.reduce((sum, et) => sum + et.players.filter(p => !p.isDead).length, 0));
-    let svgHeight = TITLE_OFFSET + totalPlayers * (CARD_EST_H + CARD_GAP);
+    // SVG 高度 = 标题偏移 + 最大槽位数 * 卡片单元高度
+    let allySlots = allyTeam.players.filter(p => !p.isDead).length;
+    let enemyTotalSlots = enemyTeams.reduce((sum, et) => sum + TEAM_HEADER_SLOTS + et.players.filter(p => !p.isDead).length, 0);
+    let maxSlots = Math.max(allySlots, enemyTotalSlots);
+    let svgHeight = TITLE_OFFSET + maxSlots * (CARD_EST_H + CARD_GAP);
 
     return `<svg class="battlefield-gunlines-overlay" viewBox="0 0 100 ${svgHeight}" preserveAspectRatio="none">
         <defs>
